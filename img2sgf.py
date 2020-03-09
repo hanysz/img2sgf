@@ -25,10 +25,12 @@ if len(sys.argv)>2:
 else:
   threshold = 80
 maxblur = 2
-angle_delta = math.pi/180 # accept lines up to 2 degrees away from horizontal or vertical
+angle_tolerance = 1.0 # accept lines up to 1 degree away from horizontal or vertical
+angle_delta = math.pi/180*angle_tolerance
 min_grid_spacing = 10
+grid_tolerance = 0.2 # accept uneven grid spacing by 20%
 show_steps = True
-#show_steps = False
+show_steps = False
 
 class Direction(Enum):
   HORIZONTAL = 1
@@ -106,56 +108,143 @@ def find_lines(threshold, direction):
         lines = vlines2
     else:
       lines = vlines1
-  return lines[:,0,0].reshape(-1,1) # clustering function prefers this shape
+  return None if lines is None else lines[:,0,0].reshape(-1,1)
+    # reshape because clustering function prefers column vector not row
 
 hlines = find_lines(threshold, Direction.HORIZONTAL)
+hcount = 0 if hlines is None else len(hlines)
 vlines = find_lines(threshold, Direction.VERTICAL)
+vcount = 0 if vlines is None else len(vlines)
+num_lines = hcount + vcount
 plt.figure(4)
-plt.title("Lines found at threshold " + str(threshold))
-#plt.scatter(all_lines[:,0,0], all_lines[:,0,1], marker=".")
+plt.title(str(num_lines) + " distinct lines found at threshold " + str(threshold))
 if hlines is not None:
-  plt.scatter(hlines, len(hlines)*[0], marker=".")
+  plt.scatter(hlines, hcount*[0], marker=".")
 if vlines is not None:
-  plt.scatter(vlines, len(vlines)*[1], marker=".")
+  plt.scatter(vlines, vcount*[1], marker=".")
 
 
 def find_clusters_fixed_threshold(threshold, direction):
   lines = find_lines(threshold, direction)
-  cluster_model = AgglomerativeClustering(n_clusters=None, linkage = 'single',  \
-                             distance_threshold=min_grid_spacing) 
-  return cluster_model.fit(lines)
+  if lines is not None:
+    cluster_model = AgglomerativeClustering(n_clusters=None, linkage = 'single',  \
+                               distance_threshold=min_grid_spacing) 
+    return cluster_model.fit(lines)
+  else:
+    return None
 
 def get_cluster_centres(model, points):
+  if model is None:
+    return None
   n = model.n_clusters_
   answer = np.zeros(n)
   for i in range(n):
     this_cluster = points[model.labels_ == i]
     answer[i] = this_cluster.mean()
+  answer.sort()
   return answer
 
 hclusters = find_clusters_fixed_threshold(threshold, Direction.HORIZ)
 hcentres = get_cluster_centres(hclusters, hlines)
+hsize = len(hcentres) if hcentres is not None else 0
 vclusters = find_clusters_fixed_threshold(threshold, Direction.VERT)
 vcentres = get_cluster_centres(vclusters, vlines)
+vsize = len(vcentres) if vcentres is not None else 0
 colours = 10*['r.','g.','b.','c.','k.','y.','m.']
 
 plt.figure(5)
-for i in range(len(hlines)):
+for i in range(hcount):
    plt.plot(hlines[i], 0, colours[hclusters.labels_[i]])
-plt.title("Got " + str(hclusters.n_clusters_) + " horizontal and " \
-          + str(vclusters.n_clusters_) + " vertical lines")
-for i in range(len(vlines)):
+plt.title("Got " + str(hsize) + " horizontal and " \
+          + str(vsize) + " vertical grid lines")
+for i in range(vcount):
    plt.plot(vlines[i], 1, colours[vclusters.labels_[i]])
-for i in hcentres:
-  plt.plot(i, 0, marker="x")
-for i in vcentres:
-  plt.plot(i, 1, marker="x")
+if hcentres is not None:
+  for i in hcentres:
+    plt.plot(i, 0, marker="x")
+if hcentres is not None:
+  for i in vcentres:
+    plt.plot(i, 1, marker="x")
 
-plt.figure(6)
-plt.title("Output")
-plt.imshow(input_image)
-for y in hcentres:
-  plt.plot((min(vcentres), max(vcentres)), (y,y), 'g')
-for x in vcentres:
-  plt.plot((x,x), (min(hcentres), max(hcentres)), 'g')
+valid_grid = True # assume grids are OK unless we find otherwise
+
+def error(msg):
+  global valid_grid
+  valid_grid = False
+  print(msg)
+
+def complete_grid(x):
+  # Input: x is a set of grid coordinates, possibly with gaps
+  #   stored as a numpy row vector, sorted
+  # Output: x with gaps filled in, if that's plausible, otherwise None if grid is invalid
+  if x is None or len(x)==0:
+    error("No grid lines found at all!")
+    return None
+
+  if len(x)==1:
+    error("Only found one grid line")
+    return None
+
+  spaces = x[1:] - x[:-1]
+  # Some of the spaces should equal the grid spacing, while some will be bigger because of gaps
+  min_space = min(spaces)
+  if min_space < min_grid_spacing:
+    error("Grid lines are too close together: minimum spacing is " + str(min_space) + " pixels")
+    return None
+  bound = min_space * (1 + grid_tolerance*2)
+  small_spaces = spaces[spaces <= bound]
+  big_spaces = spaces[spaces > bound]
+  max_space = max(small_spaces)
+  average_space = (min_space + max_space)/2
+  left = x[0]
+  right = x[-1]
+  n_exact = (right-left)/average_space
+  n = int(round(n_exact))
+  if max(n/n_exact, n_exact/n) > 1+grid_tolerance:
+    error("Uneven grid: total size is " + str(n_exact) + " times average space")
+    return None
+  for s in big_spaces:
+    m = s/average_space
+    if max(m/round(m), round(m)/n) > 1+grid_tolerance:
+      error("Uneven grid: contains a gap of " + str(m) + " times average space")
+      return None
+
+  # Now we know we have a valid grid.  Let's fill in the gaps.
+  n += 1 # need to increment because one gap equals two grid lines, two gaps=three lines etc
+  answer = np.zeros(n)
+  answer[0] = x[0]
+  i, j = 1, 1  # i points to answer grid, j points to x grid
+  for s in spaces:
+    if s <= max_space:
+      answer[i] = x[j]
+      i += 1
+      j += 1
+    else:
+      m = int(round(s/average_space))
+      for k in range(m):
+        answer[i] = x[j-1] + (k+1)*s/m # linearly interpolate the missing 'x's
+        i += 1
+      j += 1  # yes, that's right, we've incremented i 'm' times but j only once
+  return answer
+        
+print("Assessing horizontal grid lines")
+hcentres_complete = complete_grid(hcentres)
+print("Assessing vertical grid lines")
+vcentres_complete = complete_grid(vcentres)
+
+if valid_grid:
+  plt.figure(6)
+  plt.title("Grid")
+  plt.imshow(input_image)
+  print("Got " + str(len(hcentres_complete)) + " horizontal lines")
+  for y in hcentres_complete:
+    plt.plot((min(vcentres), max(vcentres)), (y,y), 'r')
+  for y in hcentres:
+    plt.plot((min(vcentres), max(vcentres)), (y,y), 'g')
+  print("Got " + str(len(vcentres_complete)) + " vertical lines")
+  for x in vcentres_complete:
+    plt.plot((x,x), (min(hcentres), max(hcentres)), 'r')
+  for x in vcentres:
+    plt.plot((x,x), (min(hcentres), max(hcentres)), 'g')
+
 plt.show()
