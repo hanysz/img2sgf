@@ -1,0 +1,8 @@
+Some challenges in using the OpenCV algorithms:
+
+In printed diagrams (unlike photos of real gobans), the stones can hide the outside edges and corners of the grid, so "look for a square" isn't a great starting point!
+
+Detection of circles via Hough transform is a bit unpredicatable: results vary according to preprocessing (amount of blurring, whether to use median or Gaussian blur).  There isn't a single "best" setting; instead it looks like I have to do circle detection several times on different preprocessed versions to catch everything.
+
+Line detection: it picks up way too many lines!  In particular, if there's a lot of stones on the board, then the tangent line to the circles gets picked up as an extra grid line.  This gets pretty bad if you're looking at endgame positions with lots of stones on the board.
+-- Solution; preprocess the image by blanking out the bounding boxes of all circles, and putting a dot where the centre of each circle used to be.
