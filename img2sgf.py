@@ -26,11 +26,22 @@ else:
 maxblur = 2
 angle_delta = math.pi/180 # accept lines up to 2 degrees away from horizontal or vertical
 min_grid_spacing = 10
+show_steps = True
 
 input_image = cv.imread(input_file)
 grey_image = cv.cvtColor(input_image, cv.COLOR_BGR2GRAY)
 edge_detected_image = cv.Canny(input_image, 50, 200)
 circles_removed_image = edge_detected_image.copy()
+
+if show_steps:
+  plt.figure(1)
+  plt.title("Input image")
+  plt.imshow(input_image)
+
+  plt.figure(2)
+  plt.title("Edge detection")
+  plt.imshow(edge_detected_image)
+
 
 # Make a few different blurred versions of the image, so we can find most of the circles
 blurs = [grey_image]
@@ -58,6 +69,10 @@ for i in range(circles.shape[0]):
   cv.rectangle(circles_removed_image, ul, lr, (0,0,0), -1)  # -1 = filled
   cv.circle(circles_removed_image, middle, 1, (255,255,255), -1)
 
+if show_steps:
+  plt.figure(3)
+  plt.title("Circles removed")
+  plt.imshow(circles_removed_image)
 hlines = cv.HoughLines(circles_removed_image, rho=1, theta=math.pi/180.0, threshold=threshold, \
           min_theta = math.pi/2 - angle_delta, max_theta = math.pi/2 + angle_delta)
 if hlines is None:
@@ -78,9 +93,10 @@ if vlines2 is not None:
 else:
   vlines = vlines1
 
-#all_lines = np.vstack((hlines, vlines))
-#plt.scatter(all_lines[:,0,0], all_lines[:,0,1])
-#plt.show()
+all_lines = np.vstack((hlines, vlines))
+plt.figure(4)
+plt.title("Lines found at threshold " + str(threshold))
+plt.scatter(all_lines[:,0,0], all_lines[:,0,1], marker=".")
 
 hcentres = hlines[:,0,0].reshape(-1,1)
 vcentres = vlines[:,0,0].reshape(-1,1)
@@ -89,6 +105,9 @@ cluster_model = AgglomerativeClustering(n_clusters=None, linkage = 'single',  \
 hclusters = cluster_model.fit(hcentres)
 print("Got " + str(hclusters.n_clusters_) + " horizontal lines")
 colours = 10*['r.','g.','b.','c.','k.','y.','m.']
+
+plt.figure(5)
+plt.title("Lines coloured by cluster")
 for i in range(len(hlines)):
    plt.plot(hlines[i,0,0], hlines[i,0,1], colours[hclusters.labels_[i]])
 vclusters = cluster_model.fit(vcentres)
