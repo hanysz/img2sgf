@@ -5,6 +5,7 @@
 # We get blobs not dots because each line is picked up multiple times
 # Next steps:
 #   apply a clustering algorithm to get unique lines
+#      -- work in progress
 #   adaptive thresholding: iterate and find the threshold that gives us most/all grid lines
 #   validate that it's a real 19x19 grid; fill in blanks if needed
 #   identify intersections at empty/black/white
@@ -14,6 +15,7 @@
 import numpy as np
 import cv2 as cv
 import matplotlib.pyplot as plt
+from sklearn.cluster import AgglomerativeClustering
 import sys, math
 
 input_file = sys.argv[1] # To do: sanity checking of command line arguments
@@ -23,6 +25,7 @@ else:
   threshold = 80
 maxblur = 2
 angle_delta = math.pi/180 # accept lines up to 2 degrees away from horizontal or vertical
+min_grid_spacing = 10
 
 input_image = cv.imread(input_file)
 grey_image = cv.cvtColor(input_image, cv.COLOR_BGR2GRAY)
@@ -75,6 +78,21 @@ if vlines2 is not None:
 else:
   vlines = vlines1
 
-all_lines = np.vstack((hlines, vlines))
-plt.scatter(all_lines[:,0,0], all_lines[:,0,1])
+#all_lines = np.vstack((hlines, vlines))
+#plt.scatter(all_lines[:,0,0], all_lines[:,0,1])
+#plt.show()
+
+hcentres = hlines[:,0,0].reshape(-1,1)
+vcentres = vlines[:,0,0].reshape(-1,1)
+cluster_model = AgglomerativeClustering(n_clusters=None, linkage = 'single',  \
+                             distance_threshold=min_grid_spacing) 
+hclusters = cluster_model.fit(hcentres)
+print("Got " + str(hclusters.n_clusters_) + " horizontal lines")
+colours = 10*['r.','g.','b.','c.','k.','y.','m.']
+for i in range(len(hlines)):
+   plt.plot(hlines[i,0,0], hlines[i,0,1], colours[hclusters.labels_[i]])
+vclusters = cluster_model.fit(vcentres)
+print("Got " + str(vclusters.n_clusters_) + " vertical lines")
+for i in range(len(vlines)):
+   plt.plot(vlines[i,0,0], vlines[i,0,1], colours[vclusters.labels_[i]])
 plt.show()
