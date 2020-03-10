@@ -30,8 +30,9 @@ angle_tolerance = 1.0 # accept lines up to 1 degree away from horizontal or vert
 angle_delta = math.pi/180*angle_tolerance
 min_grid_spacing = 10
 grid_tolerance = 0.2 # accept uneven grid spacing by 20%
+black_stone_threshold = 155 # brightness on a scale of 0-255
 show_steps = True
-#show_steps = False
+show_steps = False
 
 class Direction(Enum):
   HORIZONTAL = 1
@@ -50,11 +51,11 @@ grey_image = cv.cvtColor(input_image, cv.COLOR_BGR2GRAY)
 edge_detected_image = cv.Canny(input_image, 50, 200)
 circles_removed_image = edge_detected_image.copy()
 
-if show_steps:
-  plt.figure(1)
-  plt.title("Input image")
-  plt.imshow(input_image)
+plt.figure(1)
+plt.title("Input image")
+plt.imshow(input_image)
 
+if show_steps:
   plt.figure(2)
   plt.title("Edge detection")
   plt.imshow(edge_detected_image)
@@ -121,12 +122,13 @@ hcount = 0 if hlines is None else len(hlines)
 vlines = find_lines(threshold, Direction.VERTICAL)
 vcount = 0 if vlines is None else len(vlines)
 num_lines = hcount + vcount
-plt.figure(4)
-plt.title(str(num_lines) + " distinct lines found at threshold " + str(threshold))
-if hlines is not None:
-  plt.scatter(hlines, hcount*[0], marker=".")
-if vlines is not None:
-  plt.scatter(vlines, vcount*[1], marker=".")
+if show_steps:
+  plt.figure(4)
+  plt.title(str(num_lines) + " distinct lines found at threshold " + str(threshold))
+  if hlines is not None:
+    plt.scatter(hlines, hcount*[0], marker=".")
+  if vlines is not None:
+    plt.scatter(vlines, vcount*[1], marker=".")
 
 
 def find_clusters_fixed_threshold(threshold, direction):
@@ -157,19 +159,20 @@ vcentres = get_cluster_centres(vclusters, vlines)
 vsize_initial = len(vcentres) if vcentres is not None else 0
 colours = 10*['r.','g.','b.','c.','k.','y.','m.']
 
-plt.figure(5)
-plt.title("Got " + str(hsize_initial) + " horizontal and " \
-          + str(vsize_initial) + " vertical grid lines")
-for i in range(hcount):
-   plt.plot(hlines[i], 0, colours[hclusters.labels_[i]])
-for i in range(vcount):
-   plt.plot(vlines[i], 1, colours[vclusters.labels_[i]])
-if hcentres is not None:
-  for i in hcentres:
-    plt.plot(i, 0, marker="x")
-if hcentres is not None:
-  for i in vcentres:
-    plt.plot(i, 1, marker="x")
+if show_steps:
+  plt.figure(5)
+  plt.title("Got " + str(hsize_initial) + " horizontal and " \
+            + str(vsize_initial) + " vertical grid lines")
+  for i in range(hcount):
+     plt.plot(hlines[i], 0, colours[hclusters.labels_[i]])
+  for i in range(vcount):
+     plt.plot(vlines[i], 1, colours[vclusters.labels_[i]])
+  if hcentres is not None:
+    for i in hcentres:
+      plt.plot(i, 0, marker="x")
+  if hcentres is not None:
+    for i in vcentres:
+      plt.plot(i, 1, marker="x")
 
 valid_grid = True # assume grids are OK unless we find otherwise
 
@@ -236,6 +239,10 @@ print("Assessing horizontal grid lines")
 hcentres_complete = complete_grid(hcentres)
 print("Assessing vertical grid lines")
 vcentres_complete = complete_grid(vcentres)
+# Later we'll need the grid size and average spacing
+hsize, vsize = len(hcentres_complete), len(vcentres_complete)
+hspace = (hcentres_complete[-1] - hcentres_complete[0]) / hsize
+vspace = (vcentres_complete[-1] - vcentres_complete[0]) / vsize
 
 def closest_index(a, x):
   # Input: a is a number, x a sorted list of numbers
@@ -256,6 +263,16 @@ def closest_grid_index(p):
   # Remember that images are (x,y) but board is (row, col) so need to flip!
   return (closest_index(p[1], vcentres_complete), closest_index(p[0], hcentres_complete))
 
+def average_intensity(i, j):
+  # Input: i, j are grid coordinates of a point on the board
+  # Output: average pixel intensity of a neighbourhood of p,
+  # to help distinguish between black and white stones
+  x = hcentres_complete[i]
+  xmin, xmax = int(round(x-hspace/2)), int(round(x+hspace/2))
+  y = hcentres_complete[j]
+  ymin, ymax = int(round(y-hspace/2)), int(round(y+hspace/2))
+  return np.mean(grey_image[xmin:xmax, ymin:ymax])
+
 def output_board():
   for i in range(hsize):
     for j in range(vsize):
@@ -268,22 +285,51 @@ def output_board():
       else:
         print("? ", end="")
     print("\n", end="")
+  plt.figure(8)
+  plt.xlim(0, 30*(hsize+1))
+  plt.ylim(0, 30*(vsize+1))
+  plt.title("Output")
+  fig = plt.gcf()
+  ax = fig.gca()  # Need to manipulate the axes directly in order to be able to draw circles!
+  ax.set_aspect(1) # else it somehow comes out non-square!
+  #  (weird matplotlib design decision)
+  xmin, xmax = 15, hsize*30-15
+  ymin, ymax = 15, vsize*30-15
+  for i in range(hsize):
+    x = 15 + i*30
+    plt.plot((x,x), (ymin, ymax), 'black')
+  for i in range(vsize):
+    y = 15 + i*30
+    plt.plot((xmin, xmax), (y,y), 'black')
+  if hsize == 19 and vsize == 19: # add the star points
+    for i in [3,9,15]:
+      for j in [3,9,15]:
+        ax.add_artist(plt.Circle((15+30*i, 15+30*j), 4, color='black'))
+  for i in range(hsize):
+    for j in range(vsize):
+      if board[i,j] == BoardStates.BLACK:
+        ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 14, color='black'))
+      if board[i,j] == BoardStates.WHITE:
+        ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 14, color='black'))
+        ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 13, color='white', zorder=10))
+        
+    
 
 if valid_grid:
-  hsize, vsize = len(hcentres_complete), len(vcentres_complete)
-  plt.figure(6)
-  plt.title("Grid")
-  plt.imshow(input_image)
   print("Got " + str(hsize) + " horizontal lines")
-  for y in hcentres_complete:
-    plt.plot((min(vcentres), max(vcentres)), (y,y), 'r')
-  for y in hcentres:
-    plt.plot((min(vcentres), max(vcentres)), (y,y), 'g')
   print("Got " + str(hsize) + " vertical lines")
-  for x in vcentres_complete:
-    plt.plot((x,x), (min(hcentres), max(hcentres)), 'r')
-  for x in vcentres:
-    plt.plot((x,x), (min(hcentres), max(hcentres)), 'g')
+  if show_steps:
+    plt.figure(6)
+    plt.title("Grid")
+    plt.imshow(input_image)
+    for y in hcentres_complete:
+      plt.plot((min(vcentres), max(vcentres)), (y,y), 'r')
+    for y in hcentres:
+      plt.plot((min(vcentres), max(vcentres)), (y,y), 'g')
+    for x in vcentres_complete:
+      plt.plot((x,x), (min(hcentres), max(hcentres)), 'r')
+    for x in vcentres:
+      plt.plot((x,x), (min(hcentres), max(hcentres)), 'g')
 
   board = np.zeros((hsize, vsize))
   for c in circles:
@@ -291,11 +337,32 @@ if valid_grid:
 
   # To do:
   #   For each board point, if non-empty, calculate average pixel intensity in neighbourhood
+  #      will np.mean(img[x1:x2, y1:y2]) do it?
   #   Plot histogram of pixel intensities
   #   Identify black/white based on intensity
   #   Draw an image of the output
   #   Convert output to SGF
   #   Add ability to graphically edit output, because it still seems to be missing some circles
+
+  if show_steps:
+    num_stones = np.count_nonzero(board)
+    stone_brightnesses = np.zeros(num_stones)
+    i=0
+    for j in range(hsize):
+      for k in range(vsize):
+        if board[j,k] == BoardStates.STONE:
+          stone_brightnesses[i] = average_intensity(j, k)
+          i += 1
+    plt.figure(7)
+    plt.title("Histogram of stone brightnesses")
+    plt.hist(stone_brightnesses)
+
+  for i in range(hsize):
+    for j in range(vsize):
+      if board[i,j] == BoardStates.STONE:
+        x = average_intensity(i, j)
+        board[i,j] = BoardStates.BLACK if x <= black_stone_threshold else BoardStates.WHITE
+
   output_board()
 
 plt.show()
