@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from sklearn.cluster import AgglomerativeClustering
 from enum import Enum, IntEnum
 from bisect import bisect_left
-import sys, math
+import sys, math, string
 
 input_file = sys.argv[1] # To do: sanity checking of command line arguments
 if len(sys.argv)>2:
@@ -274,17 +274,33 @@ def average_intensity(i, j):
   return np.mean(grey_image[xmin:xmax, ymin:ymax])
 
 def output_board():
-  for i in range(hsize):
-    for j in range(vsize):
-      if board[i,j] == BoardStates.EMPTY:
-        print(". ", end="")
-      elif board[i,j] == BoardStates.BLACK:
-        print("X ", end="")
-      elif board[i,j] == BoardStates.WHITE:
-        print("O ", end="")
-      else:
-        print("? ", end="")
+  # Currently SGF output assumes 19x19 size, need to fix this!
+  # Note: rectangular boards are defined by SZ[hsize,vsize]
+  # but square must be SZ[size] -- SZ[size,size] is illegal!
+
+  # To do: save SGF to file
+  board_letters = string.ascii_lowercase # 'a' to 'z'
+  print("SGF\n--------\n")
+  print("(;GM[1]FF[4]SZ[19]")
+  if BoardStates.BLACK in board:
+    print("AB", end="")
+    for i in range(hsize):
+      for j in range(vsize):
+        if board[i,j] == BoardStates.BLACK:
+          print("[" + board_letters[i] + board_letters[j] + "]", end="")
     print("\n", end="")
+  if BoardStates.WHITE in board:
+    print("AW", end="")
+    for i in range(hsize):
+      for j in range(vsize):
+        if board[i,j] == BoardStates.WHITE:
+          print("[" + board_letters[i] + board_letters[j] + "]", end="")
+
+    print("\n", end="")
+    print(")")
+
+  print("\n--------\n")
+
   plt.figure(8)
   plt.xlim(0, 30*(hsize+1))
   plt.ylim(0, 30*(vsize+1))
