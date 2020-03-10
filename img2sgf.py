@@ -16,7 +16,8 @@ import numpy as np
 import cv2 as cv
 import matplotlib.pyplot as plt
 from sklearn.cluster import AgglomerativeClustering
-from enum import Enum
+from enum import Enum, IntEnum
+from bisect import bisect_left
 import sys, math
 
 input_file = sys.argv[1] # To do: sanity checking of command line arguments
@@ -30,7 +31,7 @@ angle_delta = math.pi/180*angle_tolerance
 min_grid_spacing = 10
 grid_tolerance = 0.2 # accept uneven grid spacing by 20%
 show_steps = True
-show_steps = False
+#show_steps = False
 
 class Direction(Enum):
   HORIZONTAL = 1
@@ -39,6 +40,10 @@ class Direction(Enum):
   VERTICAL = 2
   VERT = 2
   V = 2
+
+class BoardStates(IntEnum):
+  EMPTY, BLACK, WHITE, STONE = range(4)
+  # use STONE as temporary flag for colour not yet determined
 
 input_image = cv.imread(input_file)
 grey_image = cv.cvtColor(input_image, cv.COLOR_BGR2GRAY)
@@ -146,17 +151,17 @@ def get_cluster_centres(model, points):
 
 hclusters = find_clusters_fixed_threshold(threshold, Direction.HORIZ)
 hcentres = get_cluster_centres(hclusters, hlines)
-hsize = len(hcentres) if hcentres is not None else 0
+hsize_initial = len(hcentres) if hcentres is not None else 0
 vclusters = find_clusters_fixed_threshold(threshold, Direction.VERT)
 vcentres = get_cluster_centres(vclusters, vlines)
-vsize = len(vcentres) if vcentres is not None else 0
+vsize_initial = len(vcentres) if vcentres is not None else 0
 colours = 10*['r.','g.','b.','c.','k.','y.','m.']
 
 plt.figure(5)
+plt.title("Got " + str(hsize_initial) + " horizontal and " \
+          + str(vsize_initial) + " vertical grid lines")
 for i in range(hcount):
    plt.plot(hlines[i], 0, colours[hclusters.labels_[i]])
-plt.title("Got " + str(hsize) + " horizontal and " \
-          + str(vsize) + " vertical grid lines")
 for i in range(vcount):
    plt.plot(vlines[i], 1, colours[vclusters.labels_[i]])
 if hcentres is not None:
@@ -232,19 +237,65 @@ hcentres_complete = complete_grid(hcentres)
 print("Assessing vertical grid lines")
 vcentres_complete = complete_grid(vcentres)
 
+def closest_index(a, x):
+  # Input: a is a number, x a sorted list of numbers
+  # Output: the index of the element of x closest to a
+  # Break ties to the left (smaller index)
+  i = bisect_left(x, a)
+  # This is the index of the largest element of x that's smaller than a
+  if i==0:
+    return 0
+  if i==len(x):
+    return i-1
+  # else i is between 1 and len(x)-1 inclusive
+  return i-1 if a-x[i-1] <= x[i]-a else i
+
+def closest_grid_index(p):
+  # Input: p is (x, y) coordinates of a pixel (usually a circle centre)
+  # Output: (i, j) coordinates of p on the board
+  # Remember that images are (x,y) but board is (row, col) so need to flip!
+  return (closest_index(p[1], vcentres_complete), closest_index(p[0], hcentres_complete))
+
+def output_board():
+  for i in range(hsize):
+    for j in range(vsize):
+      if board[i,j] == BoardStates.EMPTY:
+        print(". ", end="")
+      elif board[i,j] == BoardStates.BLACK:
+        print("X ", end="")
+      elif board[i,j] == BoardStates.WHITE:
+        print("O ", end="")
+      else:
+        print("? ", end="")
+    print("\n", end="")
+
 if valid_grid:
+  hsize, vsize = len(hcentres_complete), len(vcentres_complete)
   plt.figure(6)
   plt.title("Grid")
   plt.imshow(input_image)
-  print("Got " + str(len(hcentres_complete)) + " horizontal lines")
+  print("Got " + str(hsize) + " horizontal lines")
   for y in hcentres_complete:
     plt.plot((min(vcentres), max(vcentres)), (y,y), 'r')
   for y in hcentres:
     plt.plot((min(vcentres), max(vcentres)), (y,y), 'g')
-  print("Got " + str(len(vcentres_complete)) + " vertical lines")
+  print("Got " + str(hsize) + " vertical lines")
   for x in vcentres_complete:
     plt.plot((x,x), (min(hcentres), max(hcentres)), 'r')
   for x in vcentres:
     plt.plot((x,x), (min(hcentres), max(hcentres)), 'g')
+
+  board = np.zeros((hsize, vsize))
+  for c in circles:
+    board[closest_grid_index(c[0:2])] = BoardStates.STONE
+
+  # To do:
+  #   For each board point, if non-empty, calculate average pixel intensity in neighbourhood
+  #   Plot histogram of pixel intensities
+  #   Identify black/white based on intensity
+  #   Draw an image of the output
+  #   Convert output to SGF
+  #   Add ability to graphically edit output, because it still seems to be missing some circles
+  output_board()
 
 plt.show()
