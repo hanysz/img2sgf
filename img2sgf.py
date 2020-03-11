@@ -294,7 +294,7 @@ def edit_board(event):
   coords = ax.transAxes.inverted().transform((event.x,event.y))
   # coords are on a scale of 0-1; note that (0,0) is bottom left of plot area, outside the board
   if coords is not None:
-    if coords[0] > 1 and coords[1]>0.45 and coords[1]<0.55:
+    if coords[0] > 1 and 0.45 < coords[1] < 0.55:
       save_SGF()
       return
     i = 18-int(coords[1]*20 - 0.5)
@@ -327,6 +327,7 @@ def redraw_board():
   # Draw the grid lines and stones on the current figure
   fig = plt.gcf()
   plt.clf()
+  plt.title("Output")
   ax = fig.gca()  # Need to manipulate the axes directly in order to be able to draw circles!
   #  (weird matplotlib design decision)
   ax.set_aspect(1) # else it somehow comes out non-square!
@@ -408,7 +409,7 @@ def output_board():
 
 if valid_grid:
   print("Got " + str(hsize) + " horizontal lines")
-  print("Got " + str(hsize) + " vertical lines")
+  print("Got " + str(vsize) + " vertical lines")
   plt.figure(6)
   plt.title("Grid and circles")
   plt.imshow(input_image)
