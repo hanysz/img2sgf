@@ -15,12 +15,17 @@
 import numpy as np
 import cv2 as cv
 import matplotlib.pyplot as plt
+from matplotlib.widgets import Button
 from sklearn.cluster import AgglomerativeClustering
 from enum import Enum, IntEnum
 from bisect import bisect_left
-import sys, math, string
+import sys, math, string, tkinter
+from tkinter import filedialog
 
-input_file = sys.argv[1] # To do: sanity checking of command line arguments
+if len(sys.argv)>1:
+  input_file = sys.argv[1] # To do: sanity checking of command line arguments
+else:
+  input_file = filedialog.askopenfilename()
 if len(sys.argv)>2:
   threshold = int(sys.argv[2])
 else:
@@ -243,6 +248,11 @@ vcentres_complete = complete_grid(vcentres)
 hsize, vsize = len(hcentres_complete), len(vcentres_complete)
 hspace = (hcentres_complete[-1] - hcentres_complete[0]) / hsize
 vspace = (vcentres_complete[-1] - vcentres_complete[0]) / vsize
+# And now that we know the spacing, let's get rid of any circles that are the wrong size
+# (sometimes you get little circles from bits of letters and numbers on the diagram)
+min_circle_size = min(hspace,vspace) * 0.35 # diameter must be > 70% of grid spacing
+max_circle_size = max(hspace, vspace) * 0.55 # and less than 110% of grid spacing
+circles = [c for c in circles if min_circle_size < c[2] < max_circle_size]
 
 def closest_index(a, x):
   # Input: a is a number, x a sorted list of numbers
@@ -284,9 +294,12 @@ def edit_board(event):
   coords = ax.transAxes.inverted().transform((event.x,event.y))
   # coords are on a scale of 0-1; note that (0,0) is bottom left of plot area, outside the board
   if coords is not None:
+    if coords[0] > 1 and coords[1]>0.45 and coords[1]<0.55:
+      save_SGF()
+      return
     i = 18-int(coords[1]*20 - 0.5)
     j = int(coords[0]*20 - 0.5)
-    if i<=hsize and j<=vsize:
+    if i<hsize and j<vsize:
       current_state = board[i,j]
       if event.button == 1:  # left-click
         if current_state == BoardStates.EMPTY:
@@ -303,7 +316,12 @@ def edit_board(event):
         else:
           board[i,j] = BoardStates.EMPTY
       redraw_board()
-      print(to_sgf(board))
+
+def save_SGF():
+  output_file = filedialog.asksaveasfilename()
+  sgf = open(output_file, "w")
+  sgf.write(to_sgf(board))
+  sgf.close()
 
 def redraw_board():
   # Draw the grid lines and stones on the current figure
@@ -333,6 +351,7 @@ def redraw_board():
       if board[i,j] == BoardStates.WHITE:
         ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 14, color='black'))
         ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 13, color='white', zorder=10))
+  plt.text(620,280,"Save")
   plt.draw()
 
 def to_ascii(board):
@@ -360,14 +379,14 @@ def to_sgf(board):
     for i in range(hsize):
       for j in range(vsize):
         if board[i,j] == BoardStates.BLACK:
-          output += "[" + board_letters[i] + board_letters[j] + "]"
+          output += "[" + board_letters[j] + board_letters[i] + "]"
     output += "\n"
   if BoardStates.WHITE in board:
     output += "AW"
     for i in range(hsize):
       for j in range(vsize):
         if board[i,j] == BoardStates.WHITE:
-          output += "[" + board_letters[i] + board_letters[j] + "]"
+          output += "[" + board_letters[j] + board_letters[i] + "]"
     output += "\n"
   output += ")\n"
   return output
@@ -378,13 +397,7 @@ def output_board():
   # Note: rectangular boards are defined by SZ[hsize,vsize]
   # but square must be SZ[size] -- SZ[size,size] is illegal!
 
-  # To do: save SGF to file
   # To do: try to deduce side to move from stone count
-  print("SGF\n--------\n")
-  print(to_sgf(board))
-
-  print("\n--------\n")
-
   plt.figure(8)
   plt.xlim(0, 30*(hsize+1))
   plt.ylim(0, 30*(vsize+1))
@@ -410,7 +423,7 @@ if valid_grid:
   for x in vcentres:
     plt.plot((x,x), (min(hcentres), max(hcentres)), 'g')
   for c in circles:
-    ax.add_artist(plt.Circle(c[0:2], c[2], color='orange', fill=False))
+    ax.add_artist(plt.Circle(c[0:2], c[2], color='orange', fill=False, linewidth=2))
 
   board = np.zeros((hsize, vsize))
   for c in circles:
