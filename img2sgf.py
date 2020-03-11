@@ -25,7 +25,7 @@ if len(sys.argv)>2:
   threshold = int(sys.argv[2])
 else:
   threshold = 80
-maxblur = 2
+maxblur = 3
 angle_tolerance = 1.0 # accept lines up to 1 degree away from horizontal or vertical
 angle_delta = math.pi/180*angle_tolerance
 min_grid_spacing = 10
@@ -63,7 +63,7 @@ if show_steps:
 
 # Make a few different blurred versions of the image, so we can find most of the circles
 blurs = [grey_image]
-for i in range(maxblur):
+for i in range(maxblur+1):
   b = 2*i + 1
   blurs.append(cv.medianBlur(grey_image, b))
   blurs.append(cv.GaussianBlur(grey_image, (b,b), b))
@@ -273,42 +273,45 @@ def average_intensity(i, j):
   ymin, ymax = int(round(y-hspace/2)), int(round(y+hspace/2))
   return np.mean(grey_image[xmin:xmax, ymin:ymax])
 
-def output_board():
-  # Currently SGF output assumes 19x19 size, need to fix this!
-  # Note: rectangular boards are defined by SZ[hsize,vsize]
-  # but square must be SZ[size] -- SZ[size,size] is illegal!
+def edit_board(event):
+  # Allow the user to add/remove stones by clicking on the output board
+  # This function is a matplotlib event handler for button_press_event
+  # to be attached to the plot window for the board
 
-  # To do: save SGF to file
-  board_letters = string.ascii_lowercase # 'a' to 'z'
-  print("SGF\n--------\n")
-  print("(;GM[1]FF[4]SZ[19]")
-  if BoardStates.BLACK in board:
-    print("AB", end="")
-    for i in range(hsize):
-      for j in range(vsize):
-        if board[i,j] == BoardStates.BLACK:
-          print("[" + board_letters[i] + board_letters[j] + "]", end="")
-    print("\n", end="")
-  if BoardStates.WHITE in board:
-    print("AW", end="")
-    for i in range(hsize):
-      for j in range(vsize):
-        if board[i,j] == BoardStates.WHITE:
-          print("[" + board_letters[i] + board_letters[j] + "]", end="")
+  # Currently assumes 19x19, need to fix this!
 
-    print("\n", end="")
-    print(")")
+  global board # so that we can change it from within this function
+  coords = ax.transAxes.inverted().transform((event.x,event.y))
+  # coords are on a scale of 0-1; note that (0,0) is bottom left of plot area, outside the board
+  if coords is not None:
+    i = 18-int(coords[1]*20 - 0.5)
+    j = int(coords[0]*20 - 0.5)
+    if i<=hsize and j<=vsize:
+      current_state = board[i,j]
+      if event.button == 1:  # left-click
+        if current_state == BoardStates.EMPTY:
+          board[i,j] = BoardStates.WHITE
+        elif current_state == BoardStates.WHITE:
+          board[i,j] = BoardStates.BLACK
+        else:
+          board[i,j] = BoardStates.EMPTY
+      if event.button == 3:  # right-click
+        if current_state == BoardStates.EMPTY:
+          board[i,j] = BoardStates.BLACK
+        elif current_state == BoardStates.BLACK:
+          board[i,j] = BoardStates.WHITE
+        else:
+          board[i,j] = BoardStates.EMPTY
+      redraw_board()
+      print(to_sgf(board))
 
-  print("\n--------\n")
-
-  plt.figure(8)
-  plt.xlim(0, 30*(hsize+1))
-  plt.ylim(0, 30*(vsize+1))
-  plt.title("Output")
+def redraw_board():
+  # Draw the grid lines and stones on the current figure
   fig = plt.gcf()
+  plt.clf()
   ax = fig.gca()  # Need to manipulate the axes directly in order to be able to draw circles!
-  ax.set_aspect(1) # else it somehow comes out non-square!
   #  (weird matplotlib design decision)
+  ax.set_aspect(1) # else it somehow comes out non-square!
   xmin, xmax = 15, hsize*30-15
   ymin, ymax = 15, vsize*30-15
   for i in range(hsize):
@@ -317,10 +320,12 @@ def output_board():
   for i in range(vsize):
     y = 15 + i*30
     plt.plot((xmin, xmax), (y,y), 'black')
+
   if hsize == 19 and vsize == 19: # add the star points
     for i in [3,9,15]:
       for j in [3,9,15]:
         ax.add_artist(plt.Circle((15+30*i, 15+30*j), 4, color='black'))
+
   for i in range(hsize):
     for j in range(vsize):
       if board[i,j] == BoardStates.BLACK:
@@ -328,37 +333,88 @@ def output_board():
       if board[i,j] == BoardStates.WHITE:
         ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 14, color='black'))
         ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 13, color='white', zorder=10))
-        
+  plt.draw()
+
+def to_ascii(board):
+  # Return an ASCII representation of the board state
+  output=""
+  for i in range(hsize):
+    for j in range(vsize):
+      if board[i,j] == BoardStates.EMPTY:
+        output += ". "
+      elif board[i,j] == BoardStates.BLACK:
+        output += "X "
+      elif board[i,j] == BoardStates.WHITE:
+        output += "O "
+      else:
+        output += "? "
+    output += "\n"
+  return output
+
+def to_sgf(board):
+  # Return an SGF representation of the board state
+  board_letters = string.ascii_lowercase # 'a' to 'z'
+  output = "(;GM[1]FF[4]SZ[19]\n"
+  if BoardStates.BLACK in board:
+    output += "AB"
+    for i in range(hsize):
+      for j in range(vsize):
+        if board[i,j] == BoardStates.BLACK:
+          output += "[" + board_letters[i] + board_letters[j] + "]"
+    output += "\n"
+  if BoardStates.WHITE in board:
+    output += "AW"
+    for i in range(hsize):
+      for j in range(vsize):
+        if board[i,j] == BoardStates.WHITE:
+          output += "[" + board_letters[i] + board_letters[j] + "]"
+    output += "\n"
+  output += ")\n"
+  return output
     
+
+def output_board():
+  # Currently SGF output assumes 19x19 size, need to fix this!
+  # Note: rectangular boards are defined by SZ[hsize,vsize]
+  # but square must be SZ[size] -- SZ[size,size] is illegal!
+
+  # To do: save SGF to file
+  # To do: try to deduce side to move from stone count
+  print("SGF\n--------\n")
+  print(to_sgf(board))
+
+  print("\n--------\n")
+
+  plt.figure(8)
+  plt.xlim(0, 30*(hsize+1))
+  plt.ylim(0, 30*(vsize+1))
+  plt.title("Output")
+  fig = plt.gcf()
+  fig.canvas.mpl_connect('button_press_event', edit_board)
+  redraw_board()
 
 if valid_grid:
   print("Got " + str(hsize) + " horizontal lines")
   print("Got " + str(hsize) + " vertical lines")
-  if show_steps:
-    plt.figure(6)
-    plt.title("Grid")
-    plt.imshow(input_image)
-    for y in hcentres_complete:
-      plt.plot((min(vcentres), max(vcentres)), (y,y), 'r')
-    for y in hcentres:
-      plt.plot((min(vcentres), max(vcentres)), (y,y), 'g')
-    for x in vcentres_complete:
-      plt.plot((x,x), (min(hcentres), max(hcentres)), 'r')
-    for x in vcentres:
-      plt.plot((x,x), (min(hcentres), max(hcentres)), 'g')
+  plt.figure(6)
+  plt.title("Grid and circles")
+  plt.imshow(input_image)
+  fig = plt.gcf()
+  ax = fig.gca()  # Need to manipulate the axes directly in order to be able to draw circles!
+  for y in hcentres_complete:
+    plt.plot((min(vcentres), max(vcentres)), (y,y), 'r')
+  for y in hcentres:
+    plt.plot((min(vcentres), max(vcentres)), (y,y), 'g')
+  for x in vcentres_complete:
+    plt.plot((x,x), (min(hcentres), max(hcentres)), 'r')
+  for x in vcentres:
+    plt.plot((x,x), (min(hcentres), max(hcentres)), 'g')
+  for c in circles:
+    ax.add_artist(plt.Circle(c[0:2], c[2], color='orange', fill=False))
 
   board = np.zeros((hsize, vsize))
   for c in circles:
     board[closest_grid_index(c[0:2])] = BoardStates.STONE
-
-  # To do:
-  #   For each board point, if non-empty, calculate average pixel intensity in neighbourhood
-  #      will np.mean(img[x1:x2, y1:y2]) do it?
-  #   Plot histogram of pixel intensities
-  #   Identify black/white based on intensity
-  #   Draw an image of the output
-  #   Convert output to SGF
-  #   Add ability to graphically edit output, because it still seems to be missing some circles
 
   if show_steps:
     num_stones = np.count_nonzero(board)
