@@ -22,22 +22,22 @@ from bisect import bisect_left
 import sys, math, string, tkinter
 from tkinter import filedialog
 
-if len(sys.argv)>1:
-  input_file = sys.argv[1] # To do: sanity checking of command line arguments
-else:
-  input_file = filedialog.askopenfilename()
-if len(sys.argv)>2:
-  threshold = int(sys.argv[2])
-else:
-  threshold = 80
+BOARD_SIZE = 19
+image_loaded = False
+valid_grid = False
+
+threshold = 80
 maxblur = 3
 angle_tolerance = 1.0 # accept lines up to 1 degree away from horizontal or vertical
 angle_delta = math.pi/180*angle_tolerance
 min_grid_spacing = 10
 grid_tolerance = 0.2 # accept uneven grid spacing by 20%
 black_stone_threshold = 155 # brightness on a scale of 0-255
-show_steps = True
-show_steps = False
+
+# Other global variables defined later:
+# board = numpy array of board state
+# input_file (string)
+# circles, hlines, vlines, hcentres, vcentres
 
 class Direction(Enum):
   HORIZONTAL = 1
@@ -51,48 +51,60 @@ class BoardStates(IntEnum):
   EMPTY, BLACK, WHITE, STONE = range(4)
   # use STONE as temporary flag for colour not yet determined
 
-input_image = cv.imread(input_file)
-grey_image = cv.cvtColor(input_image, cv.COLOR_BGR2GRAY)
-edge_detected_image = cv.Canny(input_image, 50, 200)
-circles_removed_image = edge_detected_image.copy()
+class Positions(IntEnum):
+  TL, T, TR, L, R, BL, B, BR = range(8)
+  # top left, top, top right, etc
+  
 
-plt.figure(1)
-plt.title("Input image")
-plt.imshow(input_image)
+def open_file():
+  global input_image
+  input_file = filedialog.askopenfilename()
+  input_image = load_image(input_file)
 
-if show_steps:
-  plt.figure(2)
-  plt.title("Edge detection")
-  plt.imshow(edge_detected_image)
+def load_image(input_file):
+  return cv.imread(input_file) # To do: error checking
 
+def process_image():
+  global grey_image, edge_detected_image, circles_removed_image, circles
+  grey_image = cv.cvtColor(input_image, cv.COLOR_BGR2GRAY)
+  edge_detected_image = cv.Canny(input_image, 50, 200)
+  circles_removed_image = edge_detected_image.copy()
 
-# Make a few different blurred versions of the image, so we can find most of the circles
-blurs = [grey_image]
-for i in range(maxblur+1):
-  b = 2*i + 1
-  blurs.append(cv.medianBlur(grey_image, b))
-  blurs.append(cv.GaussianBlur(grey_image, (b,b), b))
+  # Make a few different blurred versions of the image, so we can find most of the circles
+  blurs = [grey_image]
+  for i in range(maxblur+1):
+    b = 2*i + 1
+    blurs.append(cv.medianBlur(grey_image, b))
+    blurs.append(cv.GaussianBlur(grey_image, (b,b), b))
 
-first_circles = True
-for b in blurs:
-  c = cv.HoughCircles(b, cv.HOUGH_GRADIENT, 1, 10, np.array([]), 100, 30, 1, 30)
-  if first_circles:
-    circles = c[0]
-    first_circles = False
-  else:
-    circles = np.vstack((circles, c[0]))
+  first_circles = True
+  for b in blurs:
+    c = cv.HoughCircles(b, cv.HOUGH_GRADIENT, 1, 10, np.array([]), 100, 30, 1, 30)
+    if first_circles:
+      circles = c[0]
+      first_circles = False
+    else:
+      circles = np.vstack((circles, c[0]))
 
-# For each circle, erase the bounding box and replace by a single pixel in the middle
-for i in range(circles.shape[0]):
-  xc, yc, r = circles[i,:]
-  r = r+2 # need +2 because circle edges can stick out a little past the bounding box
-  ul = (int(round(xc-r)), int(round(yc-r)))
-  lr = (int(round(xc+r)), int(round(yc+r)))
-  middle = (int(round(xc)), int(round(yc)))
-  cv.rectangle(circles_removed_image, ul, lr, (0,0,0), -1)  # -1 = filled
-  cv.circle(circles_removed_image, middle, 1, (255,255,255), -1)
+  # For each circle, erase the bounding box and replace by a single pixel in the middle
+  for i in range(circles.shape[0]):
+    xc, yc, r = circles[i,:]
+    r = r+2 # need +2 because circle edges can stick out a little past the bounding box
+    ul = (int(round(xc-r)), int(round(yc-r)))
+    lr = (int(round(xc+r)), int(round(yc+r)))
+    middle = (int(round(xc)), int(round(yc)))
+    cv.rectangle(circles_removed_image, ul, lr, (0,0,0), -1)  # -1 = filled
+    cv.circle(circles_removed_image, middle, 1, (255,255,255), -1)
 
-if show_steps:
+def draw_images():
+  plt.figure(1)
+  plt.title("Input image")
+  plt.imshow(input_image)
+
+  #plt.figure(2)
+  #plt.title("Edge detection")
+  #plt.imshow(edge_detected_image)
+
   plt.figure(3)
   plt.title("Circles removed")
   plt.imshow(circles_removed_image)
@@ -122,19 +134,23 @@ def find_lines(threshold, direction):
   return None if lines is None else lines[:,0,0].reshape(-1,1)
     # reshape because clustering function prefers column vector not row
 
-hlines = find_lines(threshold, Direction.HORIZONTAL)
-hcount = 0 if hlines is None else len(hlines)
-vlines = find_lines(threshold, Direction.VERTICAL)
-vcount = 0 if vlines is None else len(vlines)
-num_lines = hcount + vcount
-if show_steps:
-  plt.figure(4)
-  plt.title(str(num_lines) + " distinct lines found at threshold " + str(threshold))
-  if hlines is not None:
-    plt.scatter(hlines, hcount*[0], marker=".")
-  if vlines is not None:
-    plt.scatter(vlines, vcount*[1], marker=".")
 
+def find_all_lines():
+  hlines = find_lines(threshold, Direction.HORIZONTAL)
+  hcount = 0 if hlines is None else len(hlines)
+  vlines = find_lines(threshold, Direction.VERTICAL)
+  vcount = 0 if vlines is None else len(vlines)
+  num_lines = hcount + vcount
+  log("Found " + str(hcount) + " distinct horizontal lines and " +
+                 str(vcount) + " distinct vertical lines")
+  if False:
+    plt.figure(4)
+    plt.title(str(num_lines) + " distinct lines found at threshold " + str(threshold))
+    if hlines is not None:
+      plt.scatter(hlines, hcount*[0], marker=".")
+    if vlines is not None:
+      plt.scatter(vlines, vcount*[1], marker=".")
+  return [hlines, vlines]
 
 def find_clusters_fixed_threshold(threshold, direction):
   lines = find_lines(threshold, direction)
@@ -156,21 +172,23 @@ def get_cluster_centres(model, points):
   answer.sort()
   return answer
 
-hclusters = find_clusters_fixed_threshold(threshold, Direction.HORIZ)
-hcentres = get_cluster_centres(hclusters, hlines)
-hsize_initial = len(hcentres) if hcentres is not None else 0
-vclusters = find_clusters_fixed_threshold(threshold, Direction.VERT)
-vcentres = get_cluster_centres(vclusters, vlines)
-vsize_initial = len(vcentres) if vcentres is not None else 0
-colours = 10*['r.','g.','b.','c.','k.','y.','m.']
+def cluster_lines(hlines, vlines):
+  hclusters = find_clusters_fixed_threshold(threshold, Direction.HORIZ)
+  hcentres = get_cluster_centres(hclusters, hlines)
+  hsize_initial = len(hcentres) if hcentres is not None else 0
+  vclusters = find_clusters_fixed_threshold(threshold, Direction.VERT)
+  vcentres = get_cluster_centres(vclusters, vlines)
+  vsize_initial = len(vcentres) if vcentres is not None else 0
+  colours = 10*['r.','g.','b.','c.','k.','y.','m.']
 
-if show_steps:
   plt.figure(5)
+  log("Got " + str(hsize_initial) + " horizontal and " \
+            + str(vsize_initial) + " vertical grid lines")
   plt.title("Got " + str(hsize_initial) + " horizontal and " \
             + str(vsize_initial) + " vertical grid lines")
-  for i in range(hcount):
+  for i in range(len(hlines)):
      plt.plot(hlines[i], 0, colours[hclusters.labels_[i]])
-  for i in range(vcount):
+  for i in range(len(vlines)):
      plt.plot(vlines[i], 1, colours[vclusters.labels_[i]])
   if hcentres is not None:
     for i in hcentres:
@@ -178,12 +196,9 @@ if show_steps:
   if hcentres is not None:
     for i in vcentres:
       plt.plot(i, 1, marker="x")
+  return (hcentres, vcentres)
 
-valid_grid = True # assume grids are OK unless we find otherwise
-
-def error(msg):
-  global valid_grid
-  valid_grid = False
+def log(msg):
   print(msg)
 
 def complete_grid(x):
@@ -191,18 +206,18 @@ def complete_grid(x):
   #   stored as a numpy row vector, sorted
   # Output: x with gaps filled in, if that's plausible, otherwise None if grid is invalid
   if x is None or len(x)==0:
-    error("No grid lines found at all!")
+    log("No grid lines found at all!")
     return None
 
   if len(x)==1:
-    error("Only found one grid line")
+    log("Only found one grid line")
     return None
 
   spaces = x[1:] - x[:-1]
   # Some of the spaces should equal the grid spacing, while some will be bigger because of gaps
   min_space = min(spaces)
   if min_space < min_grid_spacing:
-    error("Grid lines are too close together: minimum spacing is " + str(min_space) + " pixels")
+    log("Grid lines are too close together: minimum spacing is " + str(min_space) + " pixels")
     return None
   bound = min_space * (1 + grid_tolerance*2)
   small_spaces = spaces[spaces <= bound]
@@ -214,12 +229,12 @@ def complete_grid(x):
   n_exact = (right-left)/average_space
   n = int(round(n_exact))
   if max(n/n_exact, n_exact/n) > 1+grid_tolerance:
-    error("Uneven grid: total size is " + str(n_exact) + " times average space")
+    log("Uneven grid: total size is " + str(n_exact) + " times average space")
     return None
   for s in big_spaces:
     m = s/average_space
     if max(m/round(m), round(m)/n) > 1+grid_tolerance:
-      error("Uneven grid: contains a gap of " + str(m) + " times average space")
+      log("Uneven grid: contains a gap of " + str(m) + " times average space")
       return None
 
   # Now we know we have a valid grid.  Let's fill in the gaps.
@@ -239,20 +254,25 @@ def complete_grid(x):
         i += 1
       j += 1  # yes, that's right, we've incremented i 'm' times but j only once
   return answer
-        
-print("Assessing horizontal grid lines")
-hcentres_complete = complete_grid(hcentres)
-print("Assessing vertical grid lines")
-vcentres_complete = complete_grid(vcentres)
-# Later we'll need the grid size and average spacing
-hsize, vsize = len(hcentres_complete), len(vcentres_complete)
-hspace = (hcentres_complete[-1] - hcentres_complete[0]) / hsize
-vspace = (vcentres_complete[-1] - vcentres_complete[0]) / vsize
-# And now that we know the spacing, let's get rid of any circles that are the wrong size
-# (sometimes you get little circles from bits of letters and numbers on the diagram)
-min_circle_size = min(hspace,vspace) * 0.35 # diameter must be > 70% of grid spacing
-max_circle_size = max(hspace, vspace) * 0.55 # and less than 110% of grid spacing
-circles = [c for c in circles if min_circle_size < c[2] < max_circle_size]
+
+def validate_grid():
+  hcentres_complete = complete_grid(hcentres)
+  if hcentres_complete is None:
+    return [False] + 7*[None]
+  vcentres_complete = complete_grid(vcentres)
+  if vcentres_complete is None:
+    return [False] + 7*[None]
+  # Later we'll need the grid size and average spacing
+  hsize, vsize = len(hcentres_complete), len(vcentres_complete)
+  hspace = (hcentres_complete[-1] - hcentres_complete[0]) / hsize
+  vspace = (vcentres_complete[-1] - vcentres_complete[0]) / vsize
+  # And now that we know the spacing, let's get rid of any circles that are the wrong size
+  # (sometimes you get little circles from bits of letters and numbers on the diagram)
+  min_circle_size = min(hspace,vspace) * 0.35 # diameter must be > 70% of grid spacing
+  max_circle_size = max(hspace, vspace) * 0.55 # and less than 110% of grid spacing
+  newcircles = [c for c in circles if min_circle_size < c[2] < max_circle_size]
+  return [True, newcircles, hsize, vsize, hcentres_complete, vcentres_complete,
+          hspace, vspace]
 
 def closest_index(a, x):
   # Input: a is a number, x a sorted list of numbers
@@ -288,17 +308,15 @@ def edit_board(event):
   # This function is a matplotlib event handler for button_press_event
   # to be attached to the plot window for the board
 
-  # Currently assumes 19x19, need to fix this!
-
   global board # so that we can change it from within this function
   coords = ax.transAxes.inverted().transform((event.x,event.y))
   # coords are on a scale of 0-1; note that (0,0) is bottom left of plot area, outside the board
   if coords is not None:
-    if coords[0] > 1 and 0.45 < coords[1] < 0.55:
+    if coords[0] > 1 and 0.45 < coords[1] < 0.55: # clicked on save button
       save_SGF()
       return
-    i = 18-int(coords[1]*20 - 0.5)
-    j = int(coords[0]*20 - 0.5)
+    i = BOARD_SIZE - 1 -int(coords[1]*(BOARD_SIZE+1) - 0.5)
+    j = int(coords[0]*(BOARD_SIZE+1) - 0.5)
     if i<hsize and j<vsize:
       current_state = board[i,j]
       if event.button == 1:  # left-click
@@ -315,101 +333,10 @@ def edit_board(event):
           board[i,j] = BoardStates.WHITE
         else:
           board[i,j] = BoardStates.EMPTY
-      redraw_board()
+      draw_board()
 
-def save_SGF():
-  output_file = filedialog.asksaveasfilename()
-  sgf = open(output_file, "w")
-  sgf.write(to_sgf(board))
-  sgf.close()
-
-def redraw_board():
-  # Draw the grid lines and stones on the current figure
-  fig = plt.gcf()
-  plt.clf()
-  plt.title("Output")
-  ax = fig.gca()  # Need to manipulate the axes directly in order to be able to draw circles!
-  #  (weird matplotlib design decision)
-  ax.set_aspect(1) # else it somehow comes out non-square!
-  xmin, xmax = 15, hsize*30-15
-  ymin, ymax = 15, vsize*30-15
-  for i in range(hsize):
-    x = 15 + i*30
-    plt.plot((x,x), (ymin, ymax), 'black')
-  for i in range(vsize):
-    y = 15 + i*30
-    plt.plot((xmin, xmax), (y,y), 'black')
-
-  if hsize == 19 and vsize == 19: # add the star points
-    for i in [3,9,15]:
-      for j in [3,9,15]:
-        ax.add_artist(plt.Circle((15+30*i, 15+30*j), 4, color='black'))
-
-  for i in range(hsize):
-    for j in range(vsize):
-      if board[i,j] == BoardStates.BLACK:
-        ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 14, color='black'))
-      if board[i,j] == BoardStates.WHITE:
-        ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 14, color='black'))
-        ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 13, color='white', zorder=10))
-  plt.text(620,280,"Save")
-  plt.draw()
-
-def to_ascii(board):
-  # Return an ASCII representation of the board state
-  output=""
-  for i in range(hsize):
-    for j in range(vsize):
-      if board[i,j] == BoardStates.EMPTY:
-        output += ". "
-      elif board[i,j] == BoardStates.BLACK:
-        output += "X "
-      elif board[i,j] == BoardStates.WHITE:
-        output += "O "
-      else:
-        output += "? "
-    output += "\n"
-  return output
-
-def to_sgf(board):
-  # Return an SGF representation of the board state
-  board_letters = string.ascii_lowercase # 'a' to 'z'
-  output = "(;GM[1]FF[4]SZ[19]\n"
-  if BoardStates.BLACK in board:
-    output += "AB"
-    for i in range(hsize):
-      for j in range(vsize):
-        if board[i,j] == BoardStates.BLACK:
-          output += "[" + board_letters[j] + board_letters[i] + "]"
-    output += "\n"
-  if BoardStates.WHITE in board:
-    output += "AW"
-    for i in range(hsize):
-      for j in range(vsize):
-        if board[i,j] == BoardStates.WHITE:
-          output += "[" + board_letters[j] + board_letters[i] + "]"
-    output += "\n"
-  output += ")\n"
-  return output
-    
-
-def output_board():
-  # Currently SGF output assumes 19x19 size, need to fix this!
-  # Note: rectangular boards are defined by SZ[hsize,vsize]
-  # but square must be SZ[size] -- SZ[size,size] is illegal!
-
-  # To do: try to deduce side to move from stone count
-  plt.figure(8)
-  plt.xlim(0, 30*(hsize+1))
-  plt.ylim(0, 30*(vsize+1))
-  plt.title("Output")
-  fig = plt.gcf()
-  fig.canvas.mpl_connect('button_press_event', edit_board)
-  redraw_board()
-
-if valid_grid:
-  print("Got " + str(hsize) + " horizontal lines")
-  print("Got " + str(vsize) + " vertical lines")
+def identify_board():
+  global board, ax
   plt.figure(6)
   plt.title("Grid and circles")
   plt.imshow(input_image)
@@ -430,18 +357,17 @@ if valid_grid:
   for c in circles:
     board[closest_grid_index(c[0:2])] = BoardStates.STONE
 
-  if show_steps:
-    num_stones = np.count_nonzero(board)
-    stone_brightnesses = np.zeros(num_stones)
-    i=0
-    for j in range(hsize):
-      for k in range(vsize):
-        if board[j,k] == BoardStates.STONE:
-          stone_brightnesses[i] = average_intensity(j, k)
-          i += 1
-    plt.figure(7)
-    plt.title("Histogram of stone brightnesses")
-    plt.hist(stone_brightnesses)
+  num_stones = np.count_nonzero(board)
+  stone_brightnesses = np.zeros(num_stones)
+  i=0
+  for j in range(hsize):
+    for k in range(vsize):
+      if board[j,k] == BoardStates.STONE:
+        stone_brightnesses[i] = average_intensity(j, k)
+        i += 1
+  plt.figure(7)
+  plt.title("Histogram of stone brightnesses")
+  plt.hist(stone_brightnesses)
 
   for i in range(hsize):
     for j in range(vsize):
@@ -449,6 +375,97 @@ if valid_grid:
         x = average_intensity(i, j)
         board[i,j] = BoardStates.BLACK if x <= black_stone_threshold else BoardStates.WHITE
 
-  output_board()
+def create_board_plot():
+  # To do: try to deduce side to move from stone count
+  plt.figure(8)
+  plt.xlim(0, 30*(hsize+1))
+  plt.ylim(0, 30*(vsize+1))
+  plt.title("Output")
+  fig = plt.gcf()
+  fig.canvas.mpl_connect('button_press_event', edit_board)
+  draw_board()
+  
+def draw_board():
+  # Draw the grid lines and stones on the current figure
+  fig = plt.gcf()
+  plt.clf()
+  plt.title("Output")
+  ax = fig.gca()  # Need to manipulate the axes directly in order to be able to draw circles!
+  #  (weird matplotlib design decision)
+  ax.set_aspect(1) # else it somehow comes out non-square!
+  xmin, xmax = 15, hsize*30-15
+  ymin, ymax = 15, vsize*30-15
+  for i in range(hsize):
+    x = 15 + i*30
+    plt.plot((x,x), (ymin, ymax), 'black')
+  for i in range(vsize):
+    y = 15 + i*30
+    plt.plot((xmin, xmax), (y,y), 'black')
+
+  # Add the star points
+  for i in [3,9,15]:
+    for j in [3,9,15]:
+      ax.add_artist(plt.Circle((15+30*i, 15+30*j), 4, color='black'))
+
+  for i in range(hsize):
+    for j in range(vsize):
+      if board[i,j] == BoardStates.BLACK:
+        ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 14, color='black'))
+      if board[i,j] == BoardStates.WHITE:
+        ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 14, color='black'))
+        ax.add_artist(plt.Circle((15+30*j, ymax-30*i), 13, color='white', zorder=10))
+  plt.text(620,280,"Save")
+  plt.draw()
+
+def to_SGF(board):
+  # Return an SGF representation of the board state
+  board_letters = string.ascii_lowercase # 'a' to 'z'
+  output = "(;GM[1]FF[4]SZ[" + str(BOARD_SIZE) + "]\n"
+  if BoardStates.BLACK in board:
+    output += "AB"
+    for i in range(hsize):
+      for j in range(vsize):
+        if board[i,j] == BoardStates.BLACK:
+          output += "[" + board_letters[j] + board_letters[i] + "]"
+    output += "\n"
+  if BoardStates.WHITE in board:
+    output += "AW"
+    for i in range(hsize):
+      for j in range(vsize):
+        if board[i,j] == BoardStates.WHITE:
+          output += "[" + board_letters[j] + board_letters[i] + "]"
+    output += "\n"
+  output += ")\n"
+  return output
+    
+def save_SGF():
+  global output_file
+  if output_file is not None:
+    output_file = filedialog.asksaveasfilename(initialfile = output_file)
+  else:
+    output_file = filedialog.asksaveasfilename()
+  sgf = open(output_file, "w")
+  sgf.write(to_SGF(board))
+  sgf.close()
+
+# Execution starts here
+if len(sys.argv)>1:
+  input_file = sys.argv[1] # To do: sanity checking of command line arguments
+  input_image = load_image(input_file)
+else:
+  open_file()
+if len(sys.argv)>2:
+  output_file = sys.argv[2]
+else:
+  output_file = None
+process_image()
+draw_images()
+hlines, vlines = find_all_lines()
+hcentres, vcentres = cluster_lines(hlines, vlines)
+valid_grid, circles, hsize, vsize, hcentres_complete, vcentres_complete, \
+          hspace, vspace = validate_grid()
+if valid_grid:
+  identify_board()
+  create_board_plot()
 
 plt.show()
