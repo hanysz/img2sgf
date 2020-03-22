@@ -1,21 +1,26 @@
 # Mock up a gui for img2sgf
 # Later on I'll slot in the image processing functions
 # To do:
-#   implement double-click on input image to reset zoom level
 #   bind histogram to mouse events so that threshold value can be dragged and changed
 #   get rid of "reprocess" button, instead bind slider release to update function
 #    as per second answer at
 #    https://stackoverflow.com/questions/3966303/tkinter-slider-how-to-trigger-the-event-only-when-the-iteraction-is-complete
+#  processed frame: add checkbox for "show detected circles"
+#  put positioning dots around the board; add explanatory text for them
+#  Edit readme: decribe the algorithm and common problems
 
 import tkinter as tk
 from tkinter import messagebox as mb
 from tkinter import filedialog
+from tkinter import scrolledtext as scrolledtext
 import cv2 as cv
 import numpy as np
+import matplotlib # need to import top level package to get version number for log
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from PIL import Image, ImageTk #, ImageGrab -- Windows/Mac only!
 import pyscreenshot as ImageGrab
+from datetime import datetime
 
 threshold_default = 80 # line detection votes threshold
 black_stone_threshold = 155 # brightness on a scale of 0-255
@@ -35,6 +40,10 @@ settings_width = 900
 s_width=400 # width of sliders in the settings window
 settings_height = 730
 settings_visible = False
+log_visible = False
+
+log_width = 650
+log_height = 800
 
 # Dummy data for testing histogram and scatterplot
 small_ints = np.random.choice(range(50),100)
@@ -60,11 +69,14 @@ def process_image():
   # clean them up and blank out the canvases
   if not image_loaded:
     return
+  if rotate_angle.get() != 0:
+    log("Rotated by " + str(rotate_angle.get()) + " degrees")
   input_image_np = np.array(region_PIL.rotate(angle=-rotate_angle.get()))
-  # On image conversions, see 
-  # https://stackoverflow.com/questions/14134892/convert-image-from-pil-to-opencv-format
-  # and
-  # https://stackoverflow.com/questions/55027752/pil-image-in-grayscale-to-opencv-format
+  log("Running Canny edge detection algorithm with parameters:\n" +
+      "- min threshold=" + str(edge_min.get()) + "\n" +
+      "- max threshold=" + str(edge_max.get()) + "\n" +
+      "- Sobel aperture size=" + str(sobel.get()) + "\n" +
+      "- L" + str(gradient.get()) + " norm")
   edge_detected_image_np = cv.Canny(input_image_np,
                               edge_min.get(), edge_max.get(),
                               apertureSize = sobel.get(),
@@ -117,6 +129,8 @@ def select_region(event):
   # but not both
   region_PIL = region_PIL.crop((scale*min(sel_x1, sel_x2), scale*min(sel_y1, sel_y2),
                                 scale*max(sel_x1, sel_x2), scale*max(sel_y1, sel_y2)))
+  log("Zoomed in.  Region size " + str(region_PIL.size[0]) + "x" +
+                      str(region_PIL.size[1]))
   process_image()
   # Reset selection rectangle
   input_canvas.delete("all")
@@ -124,15 +138,36 @@ def select_region(event):
                 dash=(6,6), fill='', outline='green', width=3)
   draw_images(event=None)
 
+def zoom_out(event):
+  global region_PIL
+  if image_loaded:
+    region_PIL = input_image_PIL.copy()
+    draw_images(event=None)
+    log("Zoomed out to full size")
+    process_image()
+
+def log(msg):
+  log_text.insert(tk.END, msg + "\n")
+
 def open_file():
   global input_image_PIL, region_PIL, image_loaded
   input_file = filedialog.askopenfilename()
-  input_image_PIL = Image.open(input_file) # to do: error checking!
-  image_loaded = True
-  region_PIL = input_image_PIL.copy()
-  process_image()
-  draw_images(event=None)
-  
+  if len(input_file) > 0:
+    log("\n" + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    log("Opening file " + input_file)
+    try:
+      input_image_PIL = Image.open(input_file) # to do: error checking!
+      image_loaded = True
+      log("Image size " + str(input_image_PIL.size[0]) + "x" +
+                          str(input_image_PIL.size[1]))
+      region_PIL = input_image_PIL.copy()
+      process_image()
+      draw_images(event=None)
+    except:
+      log("Error: not a valid image file")
+      mb.showinfo("Can't open file",
+                  input_file + " isn't a valid image file")
+    
 def screen_capture():
   global input_image_PIL, region_PIL, image_loaded
   main_window.state("iconic")
@@ -140,6 +175,10 @@ def screen_capture():
   main_window.state("normal")
   region_PIL = input_image_PIL.copy()
   image_loaded = True
+  log("\n" + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+  log("Screen capture")
+  log("Image size " + str(input_image_PIL.size[0]) + "x" +
+                      str(input_image_PIL.size[1]))
   process_image()
   draw_images(event=None)
 
@@ -160,6 +199,19 @@ def toggle_settings(status = None):
     settings_window.deiconify()
     settings_visible = True
     settings_button.configure(text="hide settings")
+
+def toggle_log(status = None):
+  global log_visible
+  if status is not None:
+    log_visible = not status # and we'll flip it below
+  if log_visible:
+    log_window.withdraw()
+    log_visible = False
+    log_button.configure(text="show log")
+  else:
+    log_window.deiconify()
+    log_visible = True
+    log_button.configure(text="hide log")
 
 def reset_board():
   global board_ready, save_button
@@ -235,6 +287,7 @@ output_canvas.grid(row=1, column=2, sticky="nsew", padx=border_size, pady=border
 input_canvas.bind('<Button-1>', init_selection_rect)
 input_canvas.bind('<B1-Motion>', update_selection_rect)
 input_canvas.bind('<ButtonRelease-1>', select_region)
+input_canvas.bind('<Double-Button-1>', zoom_out)
 input_canvas.bind("<Configure>", draw_images) # also draw the processed image
 output_canvas.bind("<Configure>", draw_grid)
 
@@ -252,6 +305,8 @@ processed_text = tk.Label(processed_frame, text="Processed image")
 processed_text.pack(side=tk.TOP, pady=10)
 settings_button = tk.Button(processed_frame, text="show settings", command = toggle_settings)
 settings_button.pack()
+log_button = tk.Button(processed_frame, text="show log", command = toggle_log)
+log_button.pack()
 output_text = tk.Label(output_frame, text="Detected board position")
 output_text.grid(row=0, columnspan=2, pady=10)
 reset_button = tk.Button(output_frame, text="reset", command = reset_board)
@@ -348,4 +403,22 @@ settings_window.columnconfigure(0, weight=1)
 settings_window.columnconfigure(1, weight=1)
 
 settings_window.withdraw()
+
+log_window = tk.Toplevel()
+log_window.title("Img2SGF settings")
+log_window.geometry(str(log_width) + "x" + str(log_height))
+log_window.protocol("WM_DELETE_WINDOW", lambda : toggle_log(False))
+
+log_text = tk.scrolledtext.ScrolledText(log_window, undo=True)
+log_text.pack(expand=True, fill='both')
+log_window.withdraw()
+
+log(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+log("Using Tk version " + str(tk.TkVersion))
+log("Using OpenCV version " + cv.__version__)
+log("Using numpy version " + np.__version__)
+log("Using matplotlib version " + matplotlib.__version__)
+log("Using Pillow image library version " + Image.__version__)
+log("Using pyscreenshot/ImageGrab version " + ImageGrab.__version__)
+
 main_window.mainloop()
