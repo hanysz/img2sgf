@@ -1,13 +1,5 @@
 # Mock up a gui for img2sgf
 # Later on I'll slot in the image processing functions
-# To do:
-#   bind histogram to mouse events so that threshold value can be dragged and changed
-#   get rid of "reprocess" button, instead bind slider release to update function
-#    as per second answer at
-#    https://stackoverflow.com/questions/3966303/tkinter-slider-how-to-trigger-the-event-only-when-the-iteraction-is-complete
-#  processed frame: add checkbox for "show detected circles"
-#  put positioning dots around the board; add explanatory text for them
-#  Edit readme: decribe the algorithm and common problems
 
 import tkinter as tk
 from tkinter import messagebox as mb
@@ -29,16 +21,15 @@ edge_max_default = 200
 sobel_default = 3 # edge detection: Sobel filter size, choose from 3, 5 or 7
 gradient_default = 1 # edge detection: 1=L1 norm, 2=L2 norm
 
-
 image_size = 400
 border_size = 20
-header_size = 155
+header_size = 230
 main_width = 3*image_size + 4*border_size
 main_height = image_size + header_size + 3*border_size
 
 settings_width = 900
 s_width=400 # width of sliders in the settings window
-settings_height = 730
+settings_height = 750
 settings_visible = False
 log_visible = False
 
@@ -67,6 +58,8 @@ def process_image():
   global input_image_np, edge_detected_image_np, edge_detected_image_PIL
   # photos need to be global so that the garbage collector doesn't
   # clean them up and blank out the canvases
+  global threshold_hist, threshold_line
+  # global so that other functions can move and redraw the line
   if not image_loaded:
     return
   if rotate_angle.get() != 0:
@@ -86,9 +79,17 @@ def process_image():
   lines_plot.scatter(hcentres, len(hcentres)*[0])
   lines_plot.scatter(vcentres, len(vcentres)*[1])
   threshold_plot.draw()
-  h = stone_brightness_hist.hist(stone_brightnesses, bins=20)
-  stone_brightness_hist.plot(2*[black_stone_threshold], [0,max(h[0])])
+  threshold_hist = stone_brightness_hist.hist(stone_brightnesses, bins=20,
+                                              color='blue')
+  max_val = max(threshold_hist[0])
+  threshold_line = stone_brightness_hist.plot(2*[black_stone_threshold], [0,max_val],
+                                              color='red')
   black_thresh_hist.draw()
+
+def find_lines():
+  # placeholder
+  log("Calling 'find_lines' function, not yet implemented")
+  log("Black stone threshold is " + str(black_stone_threshold))
 
 def scale_image(img, c):
   # img = image (PIL format)
@@ -100,6 +101,10 @@ def scale_image(img, c):
   scaled_image = img.resize((round(x_i*scale), round(y_i*scale)))
   return ImageTk.PhotoImage(scaled_image)
   
+
+# The next three functions collectively implement click and drag
+# for selecting a rectangle.
+# They're bound to input_canvas mouse events
 def init_selection_rect(event):
   global sel_x1, sel_y1, sel_x2, sel_y2
   sel_x1, sel_y1 = event.x, event.y
@@ -146,8 +151,40 @@ def zoom_out(event):
     log("Zoomed out to full size")
     process_image()
 
+# The next three functions are for changing the black_stone_threshold setting
+# by click and drag
+# They're bound to black_thresh_canvas mouse events
+
+def scale_brightness(event):
+  # Utility function: event.x is pixel coordinates on the black_thresh_canvas
+  # Rescale to 0-255 range
+  coords = stone_brightness_hist.transData.inverted().transform((event.x,event.y))
+  return(int(coords[0]))
+
+def set_black_thresh(event):
+  global black_stone_threshold, threshold_line
+  if not image_loaded:
+    return
+  x_actual = scale_brightness(event)
+  x_min, x_max = stone_brightness_hist.get_xlim()
+  if 0 <= x_actual <= x_max:
+    black_stone_threshold = scale_brightness(event)
+    max_val = max(threshold_hist[0])
+    threshold_line[0].remove() # erase old line before drawing new
+    threshold_line = stone_brightness_hist.plot(2*[black_stone_threshold], [0,max_val],
+                                                color='red')
+    # Prevent axis from resizing if line is at extreme right:
+    stone_brightness_hist.set_xlim((x_min, x_max))
+    black_thresh_hist.draw()
+
+def apply_black_thresh(event):
+  if not image_loaded:
+    return
+  find_lines()
+
 def log(msg):
   log_text.insert(tk.END, msg + "\n")
+  log_text.see(tk.END) # scroll to end when the text gets long
 
 def open_file():
   global input_image_PIL, region_PIL, image_loaded
@@ -233,20 +270,49 @@ def draw_images(event):
   processed_photo = scale_image(edge_detected_image_PIL, processed_canvas)
   processed_canvas.create_image(0, 0, image = processed_photo, anchor="nw")
 
-def draw_grid(event, margin=10):
+def draw_grid(event):
   # event will always be a window configure event, i.e. move or resize
   # but we can ignore the event because we get the new width/height from the canvas
   if not board_ready:
     return
   output_canvas.delete("all")
-  x, y = output_canvas.winfo_width(), output_canvas.winfo_height()
-  s = min(x,y)
-  output_canvas.create_line(margin,margin,margin,s-margin)
-  output_canvas.create_line(s/2,margin,s/2,s-margin)
-  output_canvas.create_line(s-margin,margin,s-margin,s-margin)
-  output_canvas.create_line(margin,margin,s-margin,margin)
-  output_canvas.create_line(margin,s/2,s-margin,s/2)
-  output_canvas.create_line(margin,s-margin,s-margin,s-margin)
+  w, h = output_canvas.winfo_width(), output_canvas.winfo_height()
+  s = min(w,h) # size of board+margin
+  if s < 220:  # too small to draw the board
+    output_canvas.create_text((0,0), text="Too small!", anchor="nw")
+    return
+  width = s-60 # width of the actual board
+  coords = [i*width/18 + 30 for i in range(19)]
+  cmin, cmax = min(coords), max(coords)
+  for c in coords:
+    output_canvas.create_line(c, cmin, c, cmax)
+    output_canvas.create_line(cmin, c, cmax, c)
+  # Star points
+  for i in [coords[3], coords[9], coords[15]]:
+    for j in [coords[3], coords[9], coords[15]]:
+      output_canvas.create_oval(i-2, j-2, i+2, j+2, fill="black")
+  # Positioning circles: these should only appear for part board positions
+  for i in [15, coords[9], width+45]:
+    for j in [15, coords[9], width+45]:
+      if i!=coords[9] or j!=coords[9]:
+        output_canvas.create_oval(i-2, j-2, i+2, j+2, fill="pink")
+        output_canvas.create_oval(i-8, j-8, i+8, j+8)
+
+def edit_board(event):
+  # Placeholder: detect location of clicks but don't do anything yet
+  if not board_ready:
+    return
+  x,y = event.x, event.y
+  w, h = output_canvas.winfo_width(), output_canvas.winfo_height()
+  cmin, cmax = 30, min(w,h)-30
+  grid_space = (cmax-cmin)/18
+  if cmin-grid_space/2 < x < cmax+grid_space/2 and \
+     cmin-grid_space/2 < y < cmax+grid_space/2:
+     i, j = round((x-cmin)/(cmax-cmin)*18), round((y-cmin)/(cmax-cmin)*18)
+     log("Clicked on the board at " + str((i,j)))
+  else:
+    log("Clicked outside the board")
+
 
 ##############################
 
@@ -290,6 +356,8 @@ input_canvas.bind('<ButtonRelease-1>', select_region)
 input_canvas.bind('<Double-Button-1>', zoom_out)
 input_canvas.bind("<Configure>", draw_images) # also draw the processed image
 output_canvas.bind("<Configure>", draw_grid)
+output_canvas.bind("<ButtonRelease-1>", edit_board)
+output_canvas.bind("<ButtonRelease-2>", edit_board)
 
 input_text = tk.Label(input_frame, text="Input image")
 input_text.grid(row=0, columnspan=2, pady=10)
@@ -302,11 +370,23 @@ input_instructions = tk.Label(input_frame,
 input_instructions.grid(row=2, columnspan=2, pady=10)
 
 processed_text = tk.Label(processed_frame, text="Processed image")
-processed_text.pack(side=tk.TOP, pady=10)
+processed_text.grid(row=0, columnspan=2, pady=10)
 settings_button = tk.Button(processed_frame, text="show settings", command = toggle_settings)
-settings_button.pack()
+settings_button.grid(row=1, column=0)
 log_button = tk.Button(processed_frame, text="show log", command = toggle_log)
-log_button.pack()
+log_button.grid(row=1, column=1)
+show_circles = tk.IntVar() # whether or not to display the detected circles
+show_circles.set(1)
+show_circles_button = tk.Checkbutton(processed_frame,
+                       text="show detected circles", variable=show_circles)
+show_circles_button.grid(row=2, pady=10)
+rotate_label = tk.Label(processed_frame, text="rotate")
+rotate_label.grid(row=3, columnspan=2)
+rotate_angle = tk.Scale(processed_frame, from_=-45, to=45,
+                        orient=tk.HORIZONTAL, length=image_size)
+rotate_angle.grid(row=4, columnspan=2)
+rotate_angle.bind("<ButtonRelease-1>", lambda x: process_image())
+
 output_text = tk.Label(output_frame, text="Detected board position")
 output_text.grid(row=0, columnspan=2, pady=10)
 reset_button = tk.Button(output_frame, text="reset", command = reset_board)
@@ -315,7 +395,14 @@ save_button = tk.Button(output_frame, text="save",
                         command = save_sgf, state = tk.DISABLED)
 save_button.grid(row=1, column=1)
 output_instructions = tk.Label(output_frame,
-             text = "click on board to change between empty,\nblack stone and white stone")
+             text =
+'''Click on board to change between empty,
+black stone and white stone.
+
+For side/corner positions,
+click on circle outside board
+to choose which side/corner.
+''')
 output_instructions.grid(row=2, columnspan=2, pady=10)
 
 
@@ -333,28 +420,26 @@ settings_window.geometry(str(settings_width) + "x" + str(settings_height))
 settings_window.protocol("WM_DELETE_WINDOW", lambda : toggle_settings(False))
 
 settings1 = tk.Frame(settings_window)
-settings1.grid(row=0, column=0)
+settings1.grid(row=0, column=0, sticky="n")
 settings2 = tk.Frame(settings_window)
-settings2.grid(row=0, column=1)
+settings2.grid(row=0, column=1, sticky="n")
 
-rotate_label = tk.Label(settings1, text="rotate")
-rotate_label.grid(row=0)
-rotate_angle = tk.Scale(settings1, from_=-45, to=45, orient=tk.HORIZONTAL, length=s_width)
-rotate_angle.grid(row=1, pady=(10,50))
-edge_label = tk.Label(settings1, text="Edge detection parameters")
-edge_label.grid(row=2, pady=15)
+edge_label = tk.Label(settings1, text="Canny edge detection parameters")
+edge_label.grid(row=0, pady=15)
 edge_min_label = tk.Label(settings1, text="min threshold")
-edge_min_label.grid(row=3)
+edge_min_label.grid(row=1)
 edge_min = tk.Scale(settings1, from_=0, to=255, orient=tk.HORIZONTAL, length=s_width)
 edge_min.set(edge_min_default)
-edge_min.grid(row=4)
+edge_min.grid(row=2)
+edge_min.bind("<ButtonRelease-1>", lambda x: process_image())
 edge_max_label = tk.Label(settings1, text="max threshold")
-edge_max_label.grid(row=5, pady=(20,0))
+edge_max_label.grid(row=3, pady=(20,0))
 edge_max = tk.Scale(settings1, from_=0, to=255, orient=tk.HORIZONTAL, length=s_width)
 edge_max.set(edge_max_default)
-edge_max.grid(row=6)
+edge_max.grid(row=4)
+edge_max.bind("<ButtonRelease-1>", lambda x: process_image())
 sobel_label = tk.Label(settings1, text="Sobel aperture")
-sobel_label.grid(row=7, pady=(20,0))
+sobel_label.grid(row=5, pady=(20,0))
 def odd_only(n):
   # Restrict Sobel value scale to odd numbers
   # Thanks to https://stackoverflow.com/questions/20710514/selecting-odd-values-using-tkinter-scale for the hack
@@ -367,27 +452,29 @@ def odd_only(n):
 sobel = tk.Scale(settings1, from_=3, to=7, orient=tk.HORIZONTAL,
            command=odd_only, length=100)
 sobel.set(sobel_default)
-sobel.grid(row=8)
+sobel.grid(row=6)
+sobel.bind("<ButtonRelease-1>", lambda x: process_image())
 gradient_label = tk.Label(settings1, text="gradient")
 gradient = tk.IntVar() # choice of gradient for Canny edge detection
 gradient.set(gradient_default)
-gradient_label.grid(row=9, pady=(20,0))
-gradientL1 = tk.Radiobutton(settings1, text="L1 norm", variable=gradient, value=1)
-gradientL1.grid(row=10)
-gradientL2 = tk.Radiobutton(settings1, text="L2 norm", variable=gradient, value=2)
-gradientL2.grid(row=11)
+gradient_label.grid(row=7, pady=(20,0))
+gradientL1 = tk.Radiobutton(settings1, text="L1 norm", variable=gradient, value=1,
+                            command=process_image)
+gradientL1.grid(row=8)
+gradientL2 = tk.Radiobutton(settings1, text="L2 norm", variable=gradient, value=2,
+                            command=process_image)
+gradientL2.grid(row=9)
 
-reprocess = tk.Button(settings1, text="reprocess image", command=process_image)
-reprocess.grid(row=12, pady=20)
 
-threshold_label = tk.Label(settings2, text="line detection threshold")
+threshold_label = tk.Label(settings2,
+                           text="line detection threshold\nfor Hough transform")
 threshold_label.grid(row=0, pady=10)
 threshold = tk.Scale(settings2, from_=1, to=400, orient=tk.HORIZONTAL, length=s_width)
 threshold.set(threshold_default)
 threshold.grid(row=1, pady=(0,10))
 
 fig1 = Figure(figsize=(3,2), dpi=round(s_width/3))
-lines_plot = fig1.add_subplot(111)
+lines_plot = fig1.add_subplot(1, 1, 1)
 lines_plot.axis('off')
 threshold_plot = FigureCanvasTkAgg(fig1, master=settings2)
 threshold_plot.get_tk_widget().grid(row=2)
@@ -395,9 +482,14 @@ threshold_plot.get_tk_widget().grid(row=2)
 black_thresh_label = tk.Label(settings2, text="black stone detection")
 black_thresh_label.grid(row=3, pady=(50,20))
 fig2 = Figure(figsize=(3,2), dpi=round(s_width/3))
-stone_brightness_hist = fig2.add_subplot(111)
+#hist_axes = fig2.gca() # Need this to transform between screen coordinates and histogram values
+stone_brightness_hist = fig2.add_subplot(1, 1, 1)
 black_thresh_hist = FigureCanvasTkAgg(fig2, master=settings2)
-black_thresh_hist.get_tk_widget().grid(row=4)
+black_thresh_canvas = black_thresh_hist.get_tk_widget()
+black_thresh_canvas.grid(row=4)
+black_thresh_canvas.bind('<Button-1>', set_black_thresh)
+black_thresh_canvas.bind('<B1-Motion>', set_black_thresh)
+black_thresh_canvas.bind('<ButtonRelease-1>', apply_black_thresh)
 
 settings_window.columnconfigure(0, weight=1)
 settings_window.columnconfigure(1, weight=1)
