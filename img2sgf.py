@@ -14,20 +14,15 @@
 #   bug fix: for ex9 (corner position), stones at right edge of board are missing even though circles are detected?
 #   bug fix: ex10, threshold 48 is detecting several extra stones!
 #            ex14 extra stone on left, same issue?
-#   dynamic threshold to cope with smaller images? e.g. ex 9?
-#     try threshold = min image dimension/6?  bound between 20 and 150
-#     no, too big, needs to be non-linear?
-#      ex9 size 175 threshold 20-55
-#      ex1 size 750 threshold 50-100
-#      ex12 needs threshold at 80 or below
+#   guess/edit side to move
 #   make settings pane properly resizable
 #   add stone detection info to log
-#   blank out board and plots when loading a new file without valid board
-#   draw stones on the board -- work in progress, need white background
 #   implement reset_board()
+#   alternative detection method for white stones
 # Future enhancements
 #   set board size=19 as fixed (be consistent!); throw error if size>19
 #   handle part board positions, i.e. corner/size diagrams
+#   problem with L19 diagrams (and others): stones close together don't get detected as circles.  May need to replace Hough circle detection with contour detection?
 
 # Part 1: imports/setup
 
@@ -494,6 +489,15 @@ def log(msg):
   print(msg)
 
 
+def choose_threshold(img):
+  # img is an image in PIL format
+  # Guess the best threshold for Canny line detection
+  # Generally, smaller images work better with smaller thresholds
+  x = min(img.size)
+  t = int(x/12.8 + 16) # just guessing the parameters, this seems to work OK
+  t = min(max(t, 20), 100) # restrict to t between 20 and 100
+  return int(t)
+
 def open_file(input_file = None):
   global input_image_PIL, region_PIL, image_loaded, found_grid, valid_grid, \
          board_ready, board_edited
@@ -519,6 +523,7 @@ def open_file(input_file = None):
     log("Image size " + str(input_image_PIL.size[0]) + "x" +
                         str(input_image_PIL.size[1]))
     region_PIL = input_image_PIL.copy()
+    threshold.set(choose_threshold(region_PIL))
     process_image()
     draw_images()
 
@@ -554,6 +559,7 @@ def select_region(event):
   # but not both
   region_PIL = region_PIL.crop((scale*min(sel_x1, sel_x2), scale*min(sel_y1, sel_y2),
                                 scale*max(sel_x1, sel_x2), scale*max(sel_y1, sel_y2)))
+  threshold.set(choose_threshold(region_PIL))
   log("Zoomed in.  Region size " + str(region_PIL.size[0]) + "x" +
                       str(region_PIL.size[1]))
   process_image()
@@ -609,6 +615,7 @@ def screen_capture():
   main_window.state("normal")
   region_PIL = input_image_PIL.copy()
   image_loaded = True
+  threshold.set(choose_threshold(region_PIL))
   log("\n" + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
   log("Screen capture")
   log("Image size " + str(input_image_PIL.size[0]) + "x" +
