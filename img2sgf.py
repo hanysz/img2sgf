@@ -10,7 +10,10 @@
 # Done initial image processing,
 # To do:
 #   bug fix: for ex1, threshold=116, complete_grid blows up, way too many vertical lines
-#   change: need to draw the grid over the board even if it can't be completed
+#   bug fix: for ex7, threshold=84, seem to be getting off-by-one error with placement of several stones
+#   bug fix: for ex9 (corner position), stones at right edge of board are missing even though circles are detected?
+#   bug fix: ex10, threshold 48 is detecting several extra stones!
+#            ex14 extra stone on left, same issue?
 #   dynamic threshold to cope with smaller images? e.g. ex 9?
 #     try threshold = min image dimension/6?  bound between 20 and 150
 #     no, too big, needs to be non-linear?
@@ -18,7 +21,6 @@
 #      ex1 size 750 threshold 50-100
 #      ex12 needs threshold at 80 or below
 #   make settings pane properly resizable
-#   annotate histogram with exact threshold, count of black/white stones
 #   add stone detection info to log
 #   blank out board and plots when loading a new file without valid board
 #   draw stones on the board -- work in progress, need white background
@@ -166,18 +168,28 @@ def process_image():
 
   find_grid()
   draw_images()
+  draw_histogram(stone_brightnesses) # this should erase the histogram from any previous board
 
 def draw_histogram(stone_brightnesses):
   global threshold_hist, threshold_line
 
   stone_brightness_hist.clear()
+  if not board_ready:
+    black_thresh_hist.draw()
+    return
   threshold_hist = stone_brightness_hist.hist(stone_brightnesses, bins=20,
-                                              color='blue')
+                                              range=[0,255], color='pink')
   max_val = max(threshold_hist[0])
   if threshold_line is not None:
     threshold_line[0].remove() # remove old line before redrawing
   threshold_line = stone_brightness_hist.plot(2*[black_stone_threshold], [0,max_val],
                                               color='red')
+  stone_brightness_hist.text(black_stone_threshold, max_val*0.95,
+                             str(black_stone_threshold), fontsize=8)
+  stone_brightness_hist.text(black_stone_threshold-70, max_val*0.8,
+                             str(num_black_stones) + " black", fontsize=8)
+  stone_brightness_hist.text(black_stone_threshold+10, max_val*0.8,
+                             str(num_white_stones) + " white", fontsize=8)
   black_thresh_hist.draw()
 
 
@@ -400,9 +412,10 @@ def average_intensity(i, j):
 
 
 def identify_board():
-  global board, stone_brightnesses
+  global board, stone_brightnesses, num_black_stones, num_white_stones
 
   board = np.zeros((BOARD_SIZE, BOARD_SIZE))
+  num_black_stones, num_white_stones = 0,0
   for c in circles:
     board[closest_grid_index(c[0:2])] = BoardStates.STONE
 
@@ -414,6 +427,8 @@ def identify_board():
       if board[j,k] == BoardStates.STONE:
         stone_brightnesses[i] = average_intensity(j, k)
         i += 1
+  num_black_stones = sum(stone_brightnesses <= black_stone_threshold)
+  num_white_stones = num_stones - num_black_stones
   draw_histogram(stone_brightnesses)
 
   for i in range(hsize):
@@ -568,7 +583,7 @@ def scale_brightness(event):
 
 def set_black_thresh(event):
   global black_stone_threshold, threshold_line
-  if not image_loaded:
+  if not board_ready:
     return
   x_actual = scale_brightness(event)
   x_min, x_max = stone_brightness_hist.get_xlim()
@@ -580,14 +595,15 @@ def set_black_thresh(event):
 
 
 def apply_black_thresh(event):
-  if not image_loaded:
+  if not board_ready:
     return
   identify_board()
   draw_board()
 
     
 def screen_capture():
-  global input_image_PIL, region_PIL, image_loaded
+  global input_image_PIL, region_PIL, image_loaded, found_grid, valid_grid, \
+         board_ready, board_edited
   main_window.state("iconic")
   input_image_PIL = ImageGrab.grab()
   main_window.state("normal")
@@ -597,6 +613,12 @@ def screen_capture():
   log("Screen capture")
   log("Image size " + str(input_image_PIL.size[0]) + "x" +
                       str(input_image_PIL.size[1]))
+  image_loaded = True
+  found_grid   = False
+  valid_grid   = False
+  board_ready  = False
+  board_edited = False
+
   process_image()
   draw_images()
 
@@ -974,7 +996,7 @@ settings_window.columnconfigure(1, weight=1)
 settings_window.withdraw()
 
 log_window = tk.Toplevel()
-log_window.title("Img2SGF settings")
+log_window.title("Img2SGF log")
 log_window.geometry(str(log_width) + "x" + str(log_height))
 log_window.protocol("WM_DELETE_WINDOW", lambda : toggle_log(False))
 
