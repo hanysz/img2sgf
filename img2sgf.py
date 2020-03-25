@@ -6,15 +6,13 @@
 #   GUI functions
 #   create GUI and main loop
 
-# Work in progress: bringing together the GUI and image detection
-# Done initial image processing,
 # To do:
 #   bug fix: for ex1, threshold=116, complete_grid blows up, way too many vertical lines
 #   bug fix: for ex7, threshold=84, seem to be getting off-by-one error with placement of several stones
 #   bug fix: for ex9 (corner position), stones at right edge of board are missing even though circles are detected?
 #   bug fix: ex10, threshold 48 is detecting several extra stones!
 #            ex14 extra stone on left, same issue?
-#   guess/edit side to move
+#   bug fix: zoom in doesn't always display zoomed image if grid not detected
 #   make settings pane properly resizable
 #   add stone detection info to log
 #   implement reset_board()
@@ -25,8 +23,6 @@
 #   problem with L19 diagrams (and others): stones close together don't get detected as circles.  May need to replace Hough circle detection with contour detection?
 
 # Part 1: imports/setup
-
-#board = None # stub, remove this later
 
 import tkinter as tk
 from tkinter import messagebox as mb
@@ -69,10 +65,10 @@ settings_width = 900
 s_width=400 # width of sliders in the settings window
 settings_height = 750
 settings_visible = False
-log_visible = False
 
 log_width = 650
 log_height = 800
+log_visible = False
 
 class Direction(Enum):
   HORIZONTAL = 1
@@ -86,18 +82,19 @@ class BoardStates(IntEnum):
   EMPTY, BLACK, WHITE, STONE = range(4)
   # use STONE as temporary flag for colour not yet determined
 
-class Positions(IntEnum):
-  TL, T, TR, L, R, BL, B, BR = range(8)
-  # top left, top, top right, etc
+class Alignment(IntEnum):
+  TOP, BOTTOM, LEFT, RIGHT = range(4)
 
-
-sel_x1, sel_y1, sel_x2, sel_y2 = 0,0,0,0 #corners of selection region
+BLACK, WHITE = 1, 2 # can's use enum for this because tkIntVar() will only accept int!
 
 image_loaded = False
 found_grid   = False
 valid_grid   = False
 board_ready  = False
 board_edited = False
+
+sel_x1, sel_y1, sel_x2, sel_y2 = 0,0,0,0 #corners of selection region
+stone_brightnesses = []
 
 
 # Part 2: image processing functions
@@ -150,6 +147,8 @@ def process_image():
         circles = np.vstack((circles, c[0]))
 
   # For each circle, erase the bounding box and replace by a single pixel in the middle
+  # This makes it easier to detect grid lines when
+  # there are lots of stones on top of the line
   for i in range(len(circles)):
     xc, yc, r = circles[i,:]
     r = r+2 # need +2 because circle edges can stick out a little past the bounding box
@@ -395,6 +394,7 @@ def closest_grid_index(p):
   # Remember that images are (x,y) but board is (row, col) so need to flip!
   return (closest_index(p[1], vcentres_complete), closest_index(p[0], hcentres_complete))
 
+
 def average_intensity(i, j):
   # Input: i, j are grid coordinates of a point on the board
   # Output: average pixel intensity of a neighbourhood of p,
@@ -424,6 +424,14 @@ def identify_board():
         i += 1
   num_black_stones = sum(stone_brightnesses <= black_stone_threshold)
   num_white_stones = num_stones - num_black_stones
+
+  # Guess whose move it is based on stone count:
+  # this will sometimes be wrong because of handicaps, captures, part board positions
+  # but the user can change it with a single click
+  if num_black_stones <= num_white_stones:
+    side_to_move.set(BLACK)
+  else:
+    side_to_move.set(WHITE)
   draw_histogram(stone_brightnesses)
 
   for i in range(hsize):
@@ -432,7 +440,6 @@ def identify_board():
         x = average_intensity(i, j)
         board[i,j] = BoardStates.BLACK if x <= black_stone_threshold \
                                        else BoardStates.WHITE
-
 
 
 def find_grid():
@@ -483,6 +490,7 @@ def scale_image(img, c):
 
 # Part 3: GUI functions
 
+
 def log(msg):
   log_text.insert(tk.END, msg + "\n")
   log_text.see(tk.END) # scroll to end when the text gets long
@@ -497,6 +505,7 @@ def choose_threshold(img):
   t = int(x/12.8 + 16) # just guessing the parameters, this seems to work OK
   t = min(max(t, 20), 100) # restrict to t between 20 and 100
   return int(t)
+
 
 def open_file(input_file = None):
   global input_image_PIL, region_PIL, image_loaded, found_grid, valid_grid, \
@@ -526,6 +535,7 @@ def open_file(input_file = None):
     threshold.set(choose_threshold(region_PIL))
     process_image()
     draw_images()
+
 
 # The next three functions collectively implement click and drag
 # for selecting a rectangle.
@@ -569,6 +579,7 @@ def select_region(event):
                 dash=(6,6), fill='', outline='green', width=3)
   draw_images()
 
+
 def zoom_out(event):
   global region_PIL
   if image_loaded:
@@ -598,7 +609,6 @@ def set_black_thresh(event):
     # Prevent axis from resizing if line is at extreme right:
     stone_brightness_hist.set_xlim((x_min, x_max))
     draw_histogram(stone_brightnesses)
-
 
 def apply_black_thresh(event):
   if not board_ready:
@@ -634,23 +644,32 @@ def to_SGF(board):
   # Return an SGF representation of the board state
   board_letters = string.ascii_lowercase # 'a' to 'z'
   output = "(;GM[1]FF[4]SZ[" + str(BOARD_SIZE) + "]\n"
+  if side_to_move.get() == 1:
+    output += "PL[B]\n"
+  else:
+    output += "PL[W]\n"
+  black_moves, white_moves = "", ""
   if BoardStates.BLACK in board:
-    output += "AB"
+    black_moves += "AB"
     for i in range(hsize):
       for j in range(vsize):
         if board[i,j] == BoardStates.BLACK:
-          output += "[" + board_letters[j] + board_letters[i] + "]"
-    output += "\n"
+          black_moves += "[" + board_letters[j] + board_letters[i] + "]"
   if BoardStates.WHITE in board:
-    output += "AW"
+    white_moves += "AW"
     for i in range(hsize):
       for j in range(vsize):
         if board[i,j] == BoardStates.WHITE:
-          output += "[" + board_letters[j] + board_letters[i] + "]"
-    output += "\n"
-  output += ")\n"
+          white_moves += "[" + board_letters[j] + board_letters[i] + "]"
+  if side_to_move.get() == 1:
+    output += black_moves + "\n" + white_moves + "\n" + ")\n"
+  else:
+    output += white_moves + "\n" + black_moves + "\n" + ")\n"
+  # According to the SGF standard, it shouldn't make a difference
+  # which order the AB[] and AW[] tags come in,
+  # but at the time of writing,
+  # Lizzie uses this to deduce which side is to move (ignoring the PL[] tag)!
   return output
-
 
 
 def save_SGF():
@@ -663,7 +682,6 @@ def save_SGF():
   sgf.write(to_SGF(board))
   sgf.close()
 
-  
 
 def toggle_settings(status = None):
   # If status is not given, change visible to hidden or vice versa
@@ -737,7 +755,6 @@ def draw_images():
       processed_canvas.create_line(xmin, y*scale, xmax, y*scale, fill="green", width=2)
     for x in vcentres:
       processed_canvas.create_line(x*scale, ymin, x*scale, ymax, fill="green", width=2)
-    
 
 
 def draw_board():
@@ -782,7 +799,6 @@ def draw_board():
 
 
 def edit_board(event):
-  # Placeholder: detect location of clicks but don't do anything yet
   if not board_ready:
     return
   x,y = event.x, event.y
@@ -792,7 +808,6 @@ def edit_board(event):
   if cmin-grid_space/2 < x < cmax+grid_space/2 and \
      cmin-grid_space/2 < y < cmax+grid_space/2:
      i, j = round((y-cmin)/(cmax-cmin)*18), round((x-cmin)/(cmax-cmin)*18) # flip!
-     #log("Clicked on the board at " + str((i,j)))
      current_state = board[i,j]
      if event.num == 1:  # left-click
        if current_state == BoardStates.EMPTY:
@@ -903,11 +918,22 @@ output_instructions = tk.Label(output_frame,
 '''Click on board to change between empty,
 black stone and white stone.
 
-For side/corner positions,
+To do: For side/corner positions,
 click on circle outside board
 to choose which side/corner.
 ''')
-output_instructions.grid(row=2, columnspan=2, pady=10)
+output_instructions.grid(row=2, columnspan=2, pady=(10,0))
+
+stm_frame = tk.Frame(output_frame)
+stm_frame.grid(row=3)
+side_to_move = tk.IntVar()
+side_to_move.set(1)
+black_to_play = tk.Radiobutton(stm_frame, text="black", variable=side_to_move, value=1)
+white_to_play = tk.Radiobutton(stm_frame, text="white", variable=side_to_move, value=2)
+to_play_label = tk.Label(stm_frame, text="to play")
+black_to_play.pack(side=tk.LEFT)
+white_to_play.pack(side=tk.LEFT)
+to_play_label.pack(side=tk.LEFT)
 
 
 # Settings window layout is two frames side by side
@@ -987,7 +1013,6 @@ threshold_plot.get_tk_widget().grid(row=2)
 black_thresh_label = tk.Label(settings2, text="black stone detection")
 black_thresh_label.grid(row=3, pady=(50,20))
 fig2 = Figure(figsize=(3,2), dpi=round(s_width/3))
-#hist_axes = fig2.gca() # Need this to transform between screen coordinates and histogram values
 stone_brightness_hist = fig2.add_subplot(1, 1, 1)
 threshold_line = None # later, this will be set to the marker line on the histogram
 black_thresh_hist = FigureCanvasTkAgg(fig2, master=settings2)
