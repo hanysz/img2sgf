@@ -7,19 +7,24 @@
 #   create GUI and main loop
 
 # To do:
+#   add contrast adjustment for preprocessing -- see https://stackoverflow.com/questions/42045362/change-contrast-of-image-in-pil -- test with ex16
+#   add flip/rotate
 #   bug fix: for ex1, threshold=116, complete_grid blows up, way too many vertical lines
-#   bug fix: for ex7, threshold=84, seem to be getting off-by-one error with placement of several stones
+#   bug fix: for ex7, threshold=84, seem to be getting off-by-one error with placement of several stones.  ex17 similar
 #   bug fix: for ex9 (corner position), stones at right edge of board are missing even though circles are detected?
 #   bug fix: ex10, threshold 48 is detecting several extra stones!
 #            ex14 extra stone on left, same issue?
 #   bug fix: zoom in doesn't always display zoomed image if grid not detected
+#   for ex16, why is it getting the image edge as an extra line??  Grid better with threshold>250 but problem with stone colours and off-by-one placements.  Thin paper, lines from the other side showing through?
 #   make settings pane properly resizable
 #   add stone detection info to log
 #   implement reset_board()
+#   when rotating, rotate the original not the processed image!
+#   review checks for uneven grid spacing: too strict?
 #   alternative detection method for white stones
 # Future enhancements
 #   set board size=19 as fixed (be consistent!); throw error if size>19
-#   handle part board positions, i.e. corner/size diagrams
+#   handle part board positions, i.e. corner/side diagrams
 #   problem with L19 diagrams (and others): stones close together don't get detected as circles.  May need to replace Hough circle detection with contour detection?
 
 # Part 1: imports/setup
@@ -37,7 +42,7 @@ import matplotlib # need to import top level package to get version number for l
 import sklearn # ditto
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-from PIL import Image, ImageTk #, ImageGrab -- Windows/Mac only!
+from PIL import Image, ImageTk, ImageEnhance #, ImageGrab -- Windows/Mac only!
 import pyscreenshot as ImageGrab
 from datetime import datetime
 import sys, math, string
@@ -103,7 +108,7 @@ stone_brightnesses = []
 def process_image():
   global input_image_np, edge_detected_image_np, edge_detected_image_PIL, \
          circles, circles_removed_image_np, circles_removed_image_PIL, \
-         grey_image_np
+         grey_image_np, region_PIL
   # photos (_PIL images) need to be global so that the garbage collector doesn't
   # clean them up and blank out the canvases
   # numpy images (_np) are used by other functions
@@ -113,7 +118,14 @@ def process_image():
     return
   if rotate_angle.get() != 0:
     log("Rotated by " + str(rotate_angle.get()) + " degrees")
-  input_image_np = np.array(region_PIL.rotate(angle=-rotate_angle.get()))
+  region_PIL = raw_region_PIL.rotate(angle=-rotate_angle.get())
+  scaled_contrast = 102/(101-contrast.get())-1
+  # convert range 0-100 into range 0.01-101, with 50->1.0
+  region_PIL = ImageEnhance.Contrast(region_PIL).enhance(scaled_contrast)
+  scaled_brightness = 450/(200-brightness.get())-2
+  # convert range 0-100 into range 0.25-2.5, with 50->1.0
+  region_PIL = ImageEnhance.Brightness(region_PIL).enhance(scaled_brightness)
+  input_image_np = np.array(region_PIL)
   log("Converting to greyscale")
   grey_image_np = cv.cvtColor(input_image_np, cv.COLOR_BGR2GRAY)
   log("Running Canny edge detection algorithm with parameters:\n" +
@@ -508,7 +520,7 @@ def choose_threshold(img):
 
 
 def open_file(input_file = None):
-  global input_image_PIL, region_PIL, image_loaded, found_grid, valid_grid, \
+  global input_image_PIL, raw_region_PIL, image_loaded, found_grid, valid_grid, \
          board_ready, board_edited
   if input_file is None:
     input_file = filedialog.askopenfilename()
@@ -531,8 +543,8 @@ def open_file(input_file = None):
 
     log("Image size " + str(input_image_PIL.size[0]) + "x" +
                         str(input_image_PIL.size[1]))
-    region_PIL = input_image_PIL.copy()
-    threshold.set(choose_threshold(region_PIL))
+    raw_region_PIL = input_image_PIL.copy()
+    threshold.set(choose_threshold(raw_region_PIL))
     process_image()
     draw_images()
 
@@ -554,24 +566,24 @@ def update_selection_rect(event):
     
 def select_region(event):
   # event is mouse-up -- we can ignore the details!
-  global sel_x1, sel_y1, sel_x2, sel_y2, sel_rect_id, region_PIL
+  global sel_x1, sel_y1, sel_x2, sel_y2, sel_rect_id, raw_region_PIL
 
   if not image_loaded:
     return
   if abs(sel_x1-sel_x2) < 10 or abs(sel_y1-sel_y2) <10:
     return # don't select tiny rectangles
   x_c, y_c = input_canvas.winfo_width(), input_canvas.winfo_height()
-  x_i, y_i = region_PIL.size
+  x_i, y_i = raw_region_PIL.size
   hscale, vscale = x_i/x_c, y_i/y_c
   scale = max(hscale, vscale)
   # need to calculate both scales because there might be empty space
   # either to the right of or below the image
   # but not both
-  region_PIL = region_PIL.crop((scale*min(sel_x1, sel_x2), scale*min(sel_y1, sel_y2),
+  raw_region_PIL = raw_region_PIL.crop((scale*min(sel_x1, sel_x2), scale*min(sel_y1, sel_y2),
                                 scale*max(sel_x1, sel_x2), scale*max(sel_y1, sel_y2)))
-  threshold.set(choose_threshold(region_PIL))
-  log("Zoomed in.  Region size " + str(region_PIL.size[0]) + "x" +
-                      str(region_PIL.size[1]))
+  threshold.set(choose_threshold(raw_region_PIL))
+  log("Zoomed in.  Region size " + str(raw_region_PIL.size[0]) + "x" +
+                      str(raw_region_PIL.size[1]))
   process_image()
   # Reset selection rectangle
   input_canvas.delete("all")
@@ -581,9 +593,9 @@ def select_region(event):
 
 
 def zoom_out(event):
-  global region_PIL
+  global raw_region_PIL
   if image_loaded:
-    region_PIL = input_image_PIL.copy()
+    raw_region_PIL = input_image_PIL.copy()
     log("Zoomed out to full size")
     process_image()
     draw_images()
@@ -618,14 +630,14 @@ def apply_black_thresh(event):
 
     
 def screen_capture():
-  global input_image_PIL, region_PIL, image_loaded, found_grid, valid_grid, \
+  global input_image_PIL, raw_region_PIL, image_loaded, found_grid, valid_grid, \
          board_ready, board_edited
   main_window.state("iconic")
   input_image_PIL = ImageGrab.grab()
   main_window.state("normal")
-  region_PIL = input_image_PIL.copy()
+  raw_region_PIL = input_image_PIL.copy()
   image_loaded = True
-  threshold.set(choose_threshold(region_PIL))
+  threshold.set(choose_threshold(raw_region_PIL))
   log("\n" + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
   log("Screen capture")
   log("Image size " + str(input_image_PIL.size[0]) + "x" +
@@ -954,22 +966,35 @@ settings1.grid(row=0, column=0, sticky="n")
 settings2 = tk.Frame(settings_window)
 settings2.grid(row=0, column=1, sticky="n")
 
+contrast_label = tk.Label(settings1, text="Contrast")
+contrast_label.grid(row=1) # later put this at the top, move everything else down
+contrast = tk.Scale(settings1, from_=0, to=100, orient=tk.HORIZONTAL, length=s_width)
+contrast.set(50)
+contrast.grid(row=2)
+contrast.bind("<ButtonRelease-1>", lambda x: process_image())
+brightness_label = tk.Label(settings1, text="Brightness")
+brightness_label.grid(row=3)
+brightness = tk.Scale(settings1, from_=0, to=100, orient=tk.HORIZONTAL, length=s_width)
+brightness.set(50)
+brightness.grid(row=4, pady=(0,40))
+brightness.bind("<ButtonRelease-1>", lambda x: process_image())
+
 edge_label = tk.Label(settings1, text="Canny edge detection parameters")
-edge_label.grid(row=0, pady=15)
+edge_label.grid(row=5, pady=15)
 edge_min_label = tk.Label(settings1, text="min threshold")
-edge_min_label.grid(row=1)
+edge_min_label.grid(row=6)
 edge_min = tk.Scale(settings1, from_=0, to=255, orient=tk.HORIZONTAL, length=s_width)
 edge_min.set(edge_min_default)
-edge_min.grid(row=2)
+edge_min.grid(row=7)
 edge_min.bind("<ButtonRelease-1>", lambda x: process_image())
 edge_max_label = tk.Label(settings1, text="max threshold")
-edge_max_label.grid(row=3, pady=(20,0))
+edge_max_label.grid(row=8, pady=(20,0))
 edge_max = tk.Scale(settings1, from_=0, to=255, orient=tk.HORIZONTAL, length=s_width)
 edge_max.set(edge_max_default)
-edge_max.grid(row=4)
+edge_max.grid(row=9)
 edge_max.bind("<ButtonRelease-1>", lambda x: process_image())
 sobel_label = tk.Label(settings1, text="Sobel aperture")
-sobel_label.grid(row=5, pady=(20,0))
+sobel_label.grid(row=10, pady=(20,0))
 def odd_only(n):
   # Restrict Sobel value scale to odd numbers
   # Thanks to https://stackoverflow.com/questions/20710514/selecting-odd-values-using-tkinter-scale for the hack
@@ -982,18 +1007,18 @@ def odd_only(n):
 sobel = tk.Scale(settings1, from_=3, to=7, orient=tk.HORIZONTAL,
            command=odd_only, length=100)
 sobel.set(sobel_default)
-sobel.grid(row=6)
+sobel.grid(row=11)
 sobel.bind("<ButtonRelease-1>", lambda x: process_image())
 gradient_label = tk.Label(settings1, text="gradient")
 gradient = tk.IntVar() # choice of gradient for Canny edge detection
 gradient.set(gradient_default)
-gradient_label.grid(row=7, pady=(20,0))
+gradient_label.grid(row=12, pady=(20,0))
 gradientL1 = tk.Radiobutton(settings1, text="L1 norm", variable=gradient, value=1,
                             command=process_image)
-gradientL1.grid(row=8)
+gradientL1.grid(row=13)
 gradientL2 = tk.Radiobutton(settings1, text="L2 norm", variable=gradient, value=2,
                             command=process_image)
-gradientL2.grid(row=9)
+gradientL2.grid(row=14)
 
 
 threshold_label = tk.Label(settings2,
