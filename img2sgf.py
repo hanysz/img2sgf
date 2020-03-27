@@ -7,7 +7,6 @@
 #   create GUI and main loop
 
 # To do:
-#   add contrast adjustment for preprocessing -- see https://stackoverflow.com/questions/42045362/change-contrast-of-image-in-pil -- test with ex16
 #   add flip/rotate
 #   bug fix: for ex1, threshold=116, complete_grid blows up, way too many vertical lines
 #   bug fix: for ex7, threshold=84, seem to be getting off-by-one error with placement of several stones.  ex17 similar
@@ -17,6 +16,8 @@
 #   bug fix: zoom in doesn't always display zoomed image if grid not detected
 #   for ex16, why is it getting the image edge as an extra line??  Grid better with threshold>250 but problem with stone colours and off-by-one placements.  Thin paper, lines from the other side showing through?
 #   make settings pane properly resizable
+#   reset thresholds to default on new load/capture
+#   get rid of edge detection parameters, they don't help
 #   add stone detection info to log
 #   implement reset_board()
 #   when rotating, rotate the original not the processed image!
@@ -45,7 +46,7 @@ from matplotlib.figure import Figure
 from PIL import Image, ImageTk, ImageEnhance #, ImageGrab -- Windows/Mac only!
 import pyscreenshot as ImageGrab
 from datetime import datetime
-import sys, math, string
+import os, sys, math, string
 
 BOARD_SIZE = 19
 threshold_default = 80 # line detection votes threshold
@@ -1081,5 +1082,8 @@ else:
 if len(sys.argv)>1:
   input_file = sys.argv[1]
   open_file(input_file)
+  if output_file == None:
+    # suggest output name based on input
+    output_file = os.path.splitext(input_file)[0] + ".sgf"
 
 main_window.mainloop()
