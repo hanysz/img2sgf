@@ -7,7 +7,8 @@
 #   create GUI and main loop
 
 # To do:
-#   add flip/rotate
+#   fix rotation: need to rotate the whole image, not just selection, to prevent extra lines appearing at the end of the selection!
+#   (tried an alternative method, temporarily commented out in process_image)
 #   bug fix: for ex1, threshold=116, complete_grid blows up, way too many vertical lines
 #   bug fix: for ex7, threshold=84, seem to be getting off-by-one error with placement of several stones.  ex17 similar
 #   bug fix: for ex9 (corner position), stones at right edge of board are missing even though circles are detected?
@@ -106,6 +107,14 @@ stone_brightnesses = []
 # Part 2: image processing functions
 
 
+def rotate_image():
+  global previous_rotation_angle, region_PIL
+  delta = rotate_angle.get() - previous_rotation_angle
+  previous_rotation_angle = rotate_angle.get()
+  region_PIL = region_PIL.rotate(angle=-delta, fillcolor="white")
+  process_image()
+
+
 def process_image():
   global input_image_np, edge_detected_image_np, edge_detected_image_PIL, \
          circles, circles_removed_image_np, circles_removed_image_PIL, \
@@ -117,9 +126,9 @@ def process_image():
   # global so that other functions can move and redraw the line
   if not image_loaded:
     return
+
   if rotate_angle.get() != 0:
     log("Rotated by " + str(rotate_angle.get()) + " degrees")
-  region_PIL = raw_region_PIL.rotate(angle=-rotate_angle.get())
   scaled_contrast = 102/(101-contrast.get())-1
   # convert range 0-100 into range 0.01-101, with 50->1.0
   region_PIL = ImageEnhance.Contrast(region_PIL).enhance(scaled_contrast)
@@ -521,8 +530,8 @@ def choose_threshold(img):
 
 
 def open_file(input_file = None):
-  global input_image_PIL, raw_region_PIL, image_loaded, found_grid, valid_grid, \
-         board_ready, board_edited
+  global input_image_PIL, region_PIL, image_loaded, found_grid, valid_grid, \
+         board_ready, board_edited, previous_rotation_angle
   if input_file is None:
     input_file = filedialog.askopenfilename()
   if len(input_file) > 0:
@@ -541,11 +550,13 @@ def open_file(input_file = None):
     valid_grid   = False
     board_ready  = False
     board_edited = False
+    rotate_angle.set(0)
+    previous_rotation_angle = 0
 
     log("Image size " + str(input_image_PIL.size[0]) + "x" +
                         str(input_image_PIL.size[1]))
-    raw_region_PIL = input_image_PIL.copy()
-    threshold.set(choose_threshold(raw_region_PIL))
+    region_PIL = input_image_PIL.copy()
+    threshold.set(choose_threshold(region_PIL))
     process_image()
     draw_images()
 
@@ -567,24 +578,24 @@ def update_selection_rect(event):
     
 def select_region(event):
   # event is mouse-up -- we can ignore the details!
-  global sel_x1, sel_y1, sel_x2, sel_y2, sel_rect_id, raw_region_PIL
+  global sel_x1, sel_y1, sel_x2, sel_y2, sel_rect_id, region_PIL
 
   if not image_loaded:
     return
   if abs(sel_x1-sel_x2) < 10 or abs(sel_y1-sel_y2) <10:
     return # don't select tiny rectangles
   x_c, y_c = input_canvas.winfo_width(), input_canvas.winfo_height()
-  x_i, y_i = raw_region_PIL.size
+  x_i, y_i = region_PIL.size
   hscale, vscale = x_i/x_c, y_i/y_c
   scale = max(hscale, vscale)
   # need to calculate both scales because there might be empty space
   # either to the right of or below the image
   # but not both
-  raw_region_PIL = raw_region_PIL.crop((scale*min(sel_x1, sel_x2), scale*min(sel_y1, sel_y2),
+  region_PIL = region_PIL.crop((scale*min(sel_x1, sel_x2), scale*min(sel_y1, sel_y2),
                                 scale*max(sel_x1, sel_x2), scale*max(sel_y1, sel_y2)))
-  threshold.set(choose_threshold(raw_region_PIL))
-  log("Zoomed in.  Region size " + str(raw_region_PIL.size[0]) + "x" +
-                      str(raw_region_PIL.size[1]))
+  threshold.set(choose_threshold(region_PIL))
+  log("Zoomed in.  Region size " + str(region_PIL.size[0]) + "x" +
+                      str(region_PIL.size[1]))
   process_image()
   # Reset selection rectangle
   input_canvas.delete("all")
@@ -594,10 +605,12 @@ def select_region(event):
 
 
 def zoom_out(event):
-  global raw_region_PIL
+  global region_PIL, previous_rotation_angle
   if image_loaded:
-    raw_region_PIL = input_image_PIL.copy()
+    region_PIL = input_image_PIL.copy()
     log("Zoomed out to full size")
+    rotate_angle.set(0)
+    previous_rotation_angle = 0
     process_image()
     draw_images()
 
@@ -631,14 +644,14 @@ def apply_black_thresh(event):
 
     
 def screen_capture():
-  global input_image_PIL, raw_region_PIL, image_loaded, found_grid, valid_grid, \
-         board_ready, board_edited
+  global input_image_PIL, region_PIL, image_loaded, found_grid, valid_grid, \
+         board_ready, board_edited, previous_rotation_angle
   main_window.state("iconic")
   input_image_PIL = ImageGrab.grab()
   main_window.state("normal")
-  raw_region_PIL = input_image_PIL.copy()
+  region_PIL = input_image_PIL.copy()
   image_loaded = True
-  threshold.set(choose_threshold(raw_region_PIL))
+  threshold.set(choose_threshold(region_PIL))
   log("\n" + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
   log("Screen capture")
   log("Image size " + str(input_image_PIL.size[0]) + "x" +
@@ -648,6 +661,8 @@ def screen_capture():
   valid_grid   = False
   board_ready  = False
   board_edited = False
+  rotate_angle.set(0)
+  previous_rotation_angle = 0
 
   process_image()
   draw_images()
@@ -917,7 +932,7 @@ rotate_label.grid(row=3, columnspan=2)
 rotate_angle = tk.Scale(processed_frame, from_=-45, to=45,
                         orient=tk.HORIZONTAL, length=image_size)
 rotate_angle.grid(row=4, columnspan=2)
-rotate_angle.bind("<ButtonRelease-1>", lambda x: process_image())
+rotate_angle.bind("<ButtonRelease-1>", lambda x: rotate_image())
 
 output_text = tk.Label(output_frame, text="Detected board position")
 output_text.grid(row=0, columnspan=2, pady=10)
