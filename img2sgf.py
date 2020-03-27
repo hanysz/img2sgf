@@ -51,7 +51,8 @@ import os, sys, math, string
 
 BOARD_SIZE = 19
 threshold_default = 80 # line detection votes threshold
-black_stone_threshold = 155 # brightness on a scale of 0-255
+black_stone_threshold_default = 155 # brightness on a scale of 0-255
+black_stone_threshold = black_stone_threshold_default
 edge_min_default = 50 # edge detection min threshold
 edge_max_default = 200
 sobel_default = 3 # edge detection: Sobel filter size, choose from 3, 5 or 7
@@ -61,6 +62,8 @@ angle_tolerance = 1.0 # accept lines up to 1 degree away from horizontal or vert
 angle_delta = math.pi/180*angle_tolerance
 min_grid_spacing = 10
 grid_tolerance = 0.2 # accept uneven grid spacing by 20%
+contrast_default = 60 # by default, raise the contrast a bit, it often seems to help!
+brightness_default = 50 # don't change brightness
 
 image_size = 400
 border_size = 20
@@ -529,9 +532,30 @@ def choose_threshold(img):
   return int(t)
 
 
+def initialise_parameters():
+  # common to open_file() and screen_capture()
+  global region_PIL, image_loaded, found_grid, valid_grid, board_ready, board_edited, \
+         previous_rotation_angle, black_stone_threshold
+
+  image_loaded = True
+  found_grid   = False
+  valid_grid   = False
+  board_ready  = False
+  board_edited = False
+  rotate_angle.set(0)
+  previous_rotation_angle = 0
+  contrast.set(contrast_default)
+  brightness.set(brightness_default)
+  black_stone_threshold = black_stone_threshold_default
+
+  region_PIL = input_image_PIL.copy()
+  threshold.set(choose_threshold(region_PIL))
+  process_image()
+  draw_images()
+
+
 def open_file(input_file = None):
-  global input_image_PIL, region_PIL, image_loaded, found_grid, valid_grid, \
-         board_ready, board_edited, previous_rotation_angle
+  global input_image_PIL
   if input_file is None:
     input_file = filedialog.askopenfilename()
   if len(input_file) > 0:
@@ -545,20 +569,9 @@ def open_file(input_file = None):
                   input_file + " isn't a valid image file")
       return
 
-    image_loaded = True
-    found_grid   = False
-    valid_grid   = False
-    board_ready  = False
-    board_edited = False
-    rotate_angle.set(0)
-    previous_rotation_angle = 0
-
     log("Image size " + str(input_image_PIL.size[0]) + "x" +
                         str(input_image_PIL.size[1]))
-    region_PIL = input_image_PIL.copy()
-    threshold.set(choose_threshold(region_PIL))
-    process_image()
-    draw_images()
+    initialise_parameters()
 
 
 # The next three functions collectively implement click and drag
@@ -649,23 +662,12 @@ def screen_capture():
   main_window.state("iconic")
   input_image_PIL = ImageGrab.grab()
   main_window.state("normal")
-  region_PIL = input_image_PIL.copy()
-  image_loaded = True
   threshold.set(choose_threshold(region_PIL))
   log("\n" + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
   log("Screen capture")
   log("Image size " + str(input_image_PIL.size[0]) + "x" +
                       str(input_image_PIL.size[1]))
-  image_loaded = True
-  found_grid   = False
-  valid_grid   = False
-  board_ready  = False
-  board_edited = False
-  rotate_angle.set(0)
-  previous_rotation_angle = 0
-
-  process_image()
-  draw_images()
+  initialise_parameters()
 
 
 def to_SGF(board):
