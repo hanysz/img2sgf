@@ -7,7 +7,6 @@
 #   create GUI and main loop
 
 # To do:
-#   fix rotation: need to rotate the whole image, not just selection, to prevent extra lines appearing at the end of the selection!
 #   (tried an alternative method, temporarily commented out in process_image)
 #   bug fix: for ex1, threshold=116, complete_grid blows up, way too many vertical lines
 #   bug fix: for ex7, threshold=84, seem to be getting off-by-one error with placement of several stones.  ex17 similar
@@ -17,11 +16,9 @@
 #   bug fix: zoom in doesn't always display zoomed image if grid not detected
 #   for ex16, why is it getting the image edge as an extra line??  Grid better with threshold>250 but problem with stone colours and off-by-one placements.  Thin paper, lines from the other side showing through?
 #   make settings pane properly resizable
-#   reset thresholds to default on new load/capture
 #   get rid of edge detection parameters, they don't help
 #   add stone detection info to log
 #   implement reset_board()
-#   when rotating, rotate the original not the processed image!
 #   review checks for uneven grid spacing: too strict?
 #   alternative detection method for white stones
 # Future enhancements
@@ -62,7 +59,7 @@ angle_tolerance = 1.0 # accept lines up to 1 degree away from horizontal or vert
 angle_delta = math.pi/180*angle_tolerance
 min_grid_spacing = 10
 grid_tolerance = 0.2 # accept uneven grid spacing by 20%
-contrast_default = 60 # by default, raise the contrast a bit, it often seems to help!
+contrast_default = 70 # by default, raise the contrast a bit, it often seems to help!
 brightness_default = 50 # don't change brightness
 
 image_size = 400
@@ -416,19 +413,18 @@ def closest_index(a, x):
 def closest_grid_index(p):
   # Input: p is (x, y) coordinates of a pixel (usually a circle centre)
   # Output: (i, j) coordinates of p on the board
-  # Remember that images are (x,y) but board is (row, col) so need to flip!
-  return (closest_index(p[1], vcentres_complete), closest_index(p[0], hcentres_complete))
+  return (closest_index(p[0], vcentres_complete), closest_index(p[1], hcentres_complete))
 
 
 def average_intensity(i, j):
   # Input: i, j are grid coordinates of a point on the board
   # Output: average pixel intensity of a neighbourhood of p,
   # to help distinguish between black and white stones
-  x = hcentres_complete[i]
+  x = vcentres_complete[i]
   xmin, xmax = int(round(x-hspace/2)), int(round(x+hspace/2))
   y = hcentres_complete[j]
-  ymin, ymax = int(round(y-hspace/2)), int(round(y+hspace/2))
-  return np.mean(grey_image_np[xmin:xmax, ymin:ymax])
+  ymin, ymax = int(round(y-vspace/2)), int(round(y+vspace/2))
+  return np.mean(grey_image_np[ymin:ymax, xmin:xmax]) #nb flip x,y for np indexing
 
 
 def identify_board():
@@ -657,12 +653,10 @@ def apply_black_thresh(event):
 
     
 def screen_capture():
-  global input_image_PIL, region_PIL, image_loaded, found_grid, valid_grid, \
-         board_ready, board_edited, previous_rotation_angle
+  global input_image_PIL
   main_window.state("iconic")
   input_image_PIL = ImageGrab.grab()
   main_window.state("normal")
-  threshold.set(choose_threshold(region_PIL))
   log("\n" + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
   log("Screen capture")
   log("Image size " + str(input_image_PIL.size[0]) + "x" +
@@ -684,13 +678,13 @@ def to_SGF(board):
     for i in range(hsize):
       for j in range(vsize):
         if board[i,j] == BoardStates.BLACK:
-          black_moves += "[" + board_letters[j] + board_letters[i] + "]"
+          black_moves += "[" + board_letters[i] + board_letters[j] + "]"
   if BoardStates.WHITE in board:
     white_moves += "AW"
     for i in range(hsize):
       for j in range(vsize):
         if board[i,j] == BoardStates.WHITE:
-          white_moves += "[" + board_letters[j] + board_letters[i] + "]"
+          white_moves += "[" + board_letters[i] + board_letters[j] + "]"
   if side_to_move.get() == 1:
     output += black_moves + "\n" + white_moves + "\n" + ")\n"
   else:
@@ -814,7 +808,7 @@ def draw_board():
   # Stones
   for i in range(BOARD_SIZE):
     for j in range(BOARD_SIZE):
-      x, y = coords[j], coords[i]  # Need to flip orientation!
+      x, y = coords[i], coords[j]
       if board[i,j] == BoardStates.WHITE:
         output_canvas.create_oval(x-r, y-r, x+r, y+r, fill="white")
       elif board[i,j] == BoardStates.BLACK:
@@ -837,7 +831,7 @@ def edit_board(event):
   grid_space = (cmax-cmin)/18
   if cmin-grid_space/2 < x < cmax+grid_space/2 and \
      cmin-grid_space/2 < y < cmax+grid_space/2:
-     i, j = round((y-cmin)/(cmax-cmin)*18), round((x-cmin)/(cmax-cmin)*18) # flip!
+     i, j = round((x-cmin)/(cmax-cmin)*18), round((y-cmin)/(cmax-cmin)*18)
      current_state = board[i,j]
      if event.num == 1:  # left-click
        if current_state == BoardStates.EMPTY:
