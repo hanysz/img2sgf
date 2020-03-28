@@ -121,6 +121,9 @@ def crop_and_rotate_image():
   region_PIL = input_image_PIL.rotate(angle=-rotate_angle.get(), fillcolor="white",
                                  center = rotation_centre).crop(selection_global)
 
+  # Set line detection threshold appropriate for this image size:
+  threshold.set(choose_threshold(region_PIL))
+
 
 def process_image():
   global input_image_np, edge_detected_image_np, edge_detected_image_PIL, \
@@ -626,15 +629,35 @@ def select_region():
   # need to calculate both scales because there might be empty space
   # either to the right of or below the image
   # but not both
+  old_centre = rectangle_centre(selection_global)
   selection_global = np.array((
                       selection_global[0]+scale*sel_x1, selection_global[1]+scale*sel_y1,
                       selection_global[0]+scale*sel_x2, selection_global[1]+scale*sel_y2))
+  new_centre = rectangle_centre(selection_global)
 
-  threshold.set(choose_threshold(region_PIL))
-  log("Zoomed in.  Region size " + str(region_PIL.size[0]) + "x" +
-                      str(region_PIL.size[1]))
+  # Adjust rectangle to compensate for rotation
+  offset = new_centre - old_centre
+  theta = -rotate_angle.get() * math.pi/180 # convert from degrees to radians
+  rotation_matrix = np.array(((math.cos(theta), math.sin(theta)),
+                              (math.sin(theta), math.cos(theta))))
+  xdelta, ydelta = np.dot(rotation_matrix, offset) - offset
+  print(offset, theta, xdelta, ydelta)
+  print(rotation_matrix)
+  selection_global += (-xdelta, ydelta, -xdelta, ydelta)
+
+  # Make sure we haven't pushed the selection rectangle out of bounds:
+  selection_global[0] = max(selection_global[0], 0)
+  selection_global[1] = max(selection_global[1], 0)
+  selection_global[2] = min(selection_global[2], input_image_PIL.size[0])
+  selection_global[3] = min(selection_global[3], input_image_PIL.size[1])
+
+  new_hsize = selection_global[2]-selection_global[0]
+  new_vsize = selection_global[3]-selection_global[1]
+  log("Zoomed in.  Region size " + str(new_hsize) + "x" + str(new_vsize))
+
   process_image() # this will crop and rotate
-  # Reset selection rectangle
+
+  # Reset selection rectangle drawn on image
   input_canvas.delete("all")
   sel_rect_id = input_canvas.create_rectangle(0,0,0,0,
                 dash=(6,6), fill='', outline='green', width=3)
