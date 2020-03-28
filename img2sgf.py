@@ -7,7 +7,10 @@
 #   create GUI and main loop
 
 # To do:
-#   (tried an alternative method, temporarily commented out in process_image)
+#   fix rotaton: need to rotate original image, not region, to get rid of fill artefacts at edge of image
+#   implement reset_board()
+#   review checks for uneven grid spacing: too strict?
+#   if 21x21 grid found, omit outside edges, likely to be image borders
 #   bug fix: for ex1, threshold=116, complete_grid blows up, way too many vertical lines
 #   bug fix: for ex7, threshold=84, seem to be getting off-by-one error with placement of several stones.  ex17 similar
 #   bug fix: for ex9 (corner position), stones at right edge of board are missing even though circles are detected?
@@ -18,8 +21,6 @@
 #   make settings pane properly resizable
 #   get rid of edge detection parameters, they don't help
 #   add stone detection info to log
-#   implement reset_board()
-#   review checks for uneven grid spacing: too strict?
 #   alternative detection method for white stones
 # Future enhancements
 #   set board size=19 as fixed (be consistent!); throw error if size>19
@@ -100,18 +101,22 @@ valid_grid   = False
 board_ready  = False
 board_edited = False
 
-sel_x1, sel_y1, sel_x2, sel_y2 = 0,0,0,0 #corners of selection region
+selection_local = (0,0,0,0)
+  # selection rectangle x1, y1, x2, y2 relative to current region
+selection_global = None # current region relative to original image
+
 stone_brightnesses = []
 
 
 # Part 2: image processing functions
 
 
-def rotate_image():
-  global previous_rotation_angle, region_PIL
-  delta = rotate_angle.get() - previous_rotation_angle
-  previous_rotation_angle = rotate_angle.get()
-  region_PIL = region_PIL.rotate(angle=-delta, fillcolor="white")
+def crop_and_rotate_image():
+  global region_PIL
+  rotation_centre = ((selection_global[2]+selection_global[0])/2,
+                     (selection_global[3]+selection_global[1])/2)
+  region_PIL = input_image_PIL.rotate(angle=-rotate_angle.get(), fillcolor="white",
+                                 center = rotation_centre).crop(selection_global)
   process_image()
 
 
@@ -124,8 +129,15 @@ def process_image():
   # numpy images (_np) are used by other functions
   global threshold_hist, threshold_line
   # global so that other functions can move and redraw the line
+  global found_grid, valid_grid, board_ready, board_edited
+  # keep other functions informed of processing status
+
   if not image_loaded:
     return
+  found_grid   = False
+  valid_grid   = False
+  board_ready  = False
+  board_edited = False
 
   if rotate_angle.get() != 0:
     log("Rotated by " + str(rotate_angle.get()) + " degrees")
@@ -287,21 +299,27 @@ def cluster_lines(hlines, vlines):
 
   colours = 10*['r','g','b','c','k','y','m']
   lines_plot.clear()
+
   if len(hlines)>0:
     ymin, ymax = min(hlines), max(hlines)
+    if hclusters is not None:
+      for i in range(len(hlines)):
+        lines_plot.plot(ymin, hlines[i], color=colours[hclusters.labels_[i]], marker=".")
+    for x in vcentres:
+      lines_plot.plot((x,x), (ymin, ymax), "green", linewidth=1)
+
   if len(vlines)>0:
     xmin, xmax = min(vlines), max(vlines)
-  for i in range(len(hlines)):
-    lines_plot.plot(ymin, hlines[i], color=colours[hclusters.labels_[i]], marker=".")
-  for i in range(len(vlines)):
-    lines_plot.plot(vlines[i], xmin, color=colours[vclusters.labels_[i]], marker=".")
-  for y in hcentres:
-    lines_plot.plot((xmin, xmax), (y,y), color="green", linewidth=1)
-  for x in vcentres:
-    lines_plot.plot((x,x), (ymin, ymax), "green", linewidth=1)
+    if vclusters is not None:
+      for i in range(len(vlines)):
+        lines_plot.plot(vlines[i], xmin, color=colours[vclusters.labels_[i]], marker=".")
+    for y in hcentres:
+      lines_plot.plot((xmin, xmax), (y,y), color="green", linewidth=1)
+
   threshold_plot.draw()
 
-  found_grid = True
+  if len(hcentres)>0 and len(vcentres)>0:
+    found_grid = True
 
   return (hcentres, vcentres)
 
@@ -531,7 +549,7 @@ def choose_threshold(img):
 def initialise_parameters():
   # common to open_file() and screen_capture()
   global region_PIL, image_loaded, found_grid, valid_grid, board_ready, board_edited, \
-         previous_rotation_angle, black_stone_threshold
+         previous_rotation_angle, black_stone_threshold, selection_global
 
   image_loaded = True
   found_grid   = False
@@ -545,6 +563,8 @@ def initialise_parameters():
   black_stone_threshold = black_stone_threshold_default
 
   region_PIL = input_image_PIL.copy()
+  selection_global = (0, 0) + region_PIL.size
+  rotate_angle.set(0)
   threshold.set(choose_threshold(region_PIL))
   process_image()
   draw_images()
@@ -574,23 +594,25 @@ def open_file(input_file = None):
 # for selecting a rectangle.
 # They're bound to input_canvas mouse events
 def init_selection_rect(event):
-  global sel_x1, sel_y1, sel_x2, sel_y2
-  sel_x1, sel_y1 = event.x, event.y
-  sel_x2, sel_y2 = event.x, event.y
+  global selection_local
+  selection_local = (event.x, event.y, event.x, event.y)
 
 def update_selection_rect(event):
-  global sel_rect_id, sel_x2, sel_y2
+  global sel_rect_id, selection_local
   if not image_loaded:
     return
+  sel_x1, sel_y1 = selection_local[0:2]
   sel_x2, sel_y2 = event.x, event.y
-  input_canvas.coords(sel_rect_id, sel_x1, sel_y1, sel_x2, sel_y2)
+  selection_local = (min(sel_x1, sel_x2), min(sel_y1, sel_y2),
+                     max(sel_x1, sel_x2), max(sel_y1, sel_y2))
+  input_canvas.coords(sel_rect_id, selection_local)
     
-def select_region(event):
-  # event is mouse-up -- we can ignore the details!
-  global sel_x1, sel_y1, sel_x2, sel_y2, sel_rect_id, region_PIL
+def select_region():
+  global selection_local, selection_global, sel_rect_id, region_PIL
 
   if not image_loaded:
     return
+  sel_x1, sel_y1, sel_x2, sel_y2 = selection_local
   if abs(sel_x1-sel_x2) < 10 or abs(sel_y1-sel_y2) <10:
     return # don't select tiny rectangles
   x_c, y_c = input_canvas.winfo_width(), input_canvas.winfo_height()
@@ -600,8 +622,10 @@ def select_region(event):
   # need to calculate both scales because there might be empty space
   # either to the right of or below the image
   # but not both
-  region_PIL = region_PIL.crop((scale*min(sel_x1, sel_x2), scale*min(sel_y1, sel_y2),
-                                scale*max(sel_x1, sel_x2), scale*max(sel_y1, sel_y2)))
+  selection_global = (selection_global[0]+scale*sel_x1, selection_global[1]+scale*sel_y1,
+                      selection_global[0]+scale*sel_x2, selection_global[1]+scale*sel_y2)
+
+  crop_and_rotate_image()
   threshold.set(choose_threshold(region_PIL))
   log("Zoomed in.  Region size " + str(region_PIL.size[0]) + "x" +
                       str(region_PIL.size[1]))
@@ -618,10 +642,7 @@ def zoom_out(event):
   if image_loaded:
     region_PIL = input_image_PIL.copy()
     log("Zoomed out to full size")
-    rotate_angle.set(0)
-    previous_rotation_angle = 0
-    process_image()
-    draw_images()
+    initialise_parameters()
 
 # The next three functions are for changing the black_stone_threshold setting
 # by click and drag
@@ -894,7 +915,7 @@ output_canvas.grid(row=1, column=2, sticky="nsew", padx=border_size, pady=border
 
 input_canvas.bind('<Button-1>', init_selection_rect)
 input_canvas.bind('<B1-Motion>', update_selection_rect)
-input_canvas.bind('<ButtonRelease-1>', select_region)
+input_canvas.bind('<ButtonRelease-1>', lambda x : select_region())
 input_canvas.bind('<Double-Button-1>', zoom_out)
 input_canvas.bind("<Configure>", lambda x : draw_images()) # also draw the processed image
 output_canvas.bind("<Configure>", lambda x: draw_board())
@@ -928,7 +949,7 @@ rotate_label.grid(row=3, columnspan=2)
 rotate_angle = tk.Scale(processed_frame, from_=-45, to=45,
                         orient=tk.HORIZONTAL, length=image_size)
 rotate_angle.grid(row=4, columnspan=2)
-rotate_angle.bind("<ButtonRelease-1>", lambda x: rotate_image())
+rotate_angle.bind("<ButtonRelease-1>", lambda x: crop_and_rotate_image())
 
 output_text = tk.Label(output_frame, text="Detected board position")
 output_text.grid(row=0, columnspan=2, pady=10)
