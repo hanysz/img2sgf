@@ -101,9 +101,9 @@ valid_grid   = False
 board_ready  = False
 board_edited = False
 
-selection_local = (0,0,0,0)
+selection_local = np.array((0,0,0,0))
   # selection rectangle x1, y1, x2, y2 relative to current region
-selection_global = None # current region relative to original image
+selection_global = np.array((0,0,0,0)) # current region relative to original image
 
 stone_brightnesses = []
 
@@ -111,13 +111,15 @@ stone_brightnesses = []
 # Part 2: image processing functions
 
 
+def rectangle_centre(a):
+  return np.array(( (a[0]+a[2])/2, a[1]+a[3]/2 ))
+
+
 def crop_and_rotate_image():
   global region_PIL
-  rotation_centre = ((selection_global[2]+selection_global[0])/2,
-                     (selection_global[3]+selection_global[1])/2)
+  rotation_centre = tuple(rectangle_centre(selection_global))
   region_PIL = input_image_PIL.rotate(angle=-rotate_angle.get(), fillcolor="white",
                                  center = rotation_centre).crop(selection_global)
-  process_image()
 
 
 def process_image():
@@ -138,6 +140,8 @@ def process_image():
   valid_grid   = False
   board_ready  = False
   board_edited = False
+
+  crop_and_rotate_image()
 
   if rotate_angle.get() != 0:
     log("Rotated by " + str(rotate_angle.get()) + " degrees")
@@ -563,7 +567,7 @@ def initialise_parameters():
   black_stone_threshold = black_stone_threshold_default
 
   region_PIL = input_image_PIL.copy()
-  selection_global = (0, 0) + region_PIL.size
+  selection_global = np.array([0,0] + list(region_PIL.size))
   rotate_angle.set(0)
   threshold.set(choose_threshold(region_PIL))
   process_image()
@@ -595,25 +599,25 @@ def open_file(input_file = None):
 # They're bound to input_canvas mouse events
 def init_selection_rect(event):
   global selection_local
-  selection_local = (event.x, event.y, event.x, event.y)
+  selection_local = np.array((event.x, event.y, event.x, event.y))
 
 def update_selection_rect(event):
   global sel_rect_id, selection_local
   if not image_loaded:
     return
-  sel_x1, sel_y1 = selection_local[0:2]
-  sel_x2, sel_y2 = event.x, event.y
-  selection_local = (min(sel_x1, sel_x2), min(sel_y1, sel_y2),
-                     max(sel_x1, sel_x2), max(sel_y1, sel_y2))
-  input_canvas.coords(sel_rect_id, selection_local)
+  selection_local[2:4] = (event.x, event.y)
+  input_canvas.coords(sel_rect_id, tuple(selection_local))
     
 def select_region():
   global selection_local, selection_global, sel_rect_id, region_PIL
 
   if not image_loaded:
     return
-  sel_x1, sel_y1, sel_x2, sel_y2 = selection_local
-  if abs(sel_x1-sel_x2) < 10 or abs(sel_y1-sel_y2) <10:
+  xs = (selection_local[0], selection_local[2])
+  sel_x1, sel_x2 = min(xs), max(xs)
+  ys = (selection_local[1], selection_local[3])
+  sel_y1, sel_y2 = min(ys), max(ys)
+  if sel_x2-sel_x1 < 10 or sel_y2-sel_y1 <10:
     return # don't select tiny rectangles
   x_c, y_c = input_canvas.winfo_width(), input_canvas.winfo_height()
   x_i, y_i = region_PIL.size
@@ -622,14 +626,14 @@ def select_region():
   # need to calculate both scales because there might be empty space
   # either to the right of or below the image
   # but not both
-  selection_global = (selection_global[0]+scale*sel_x1, selection_global[1]+scale*sel_y1,
-                      selection_global[0]+scale*sel_x2, selection_global[1]+scale*sel_y2)
+  selection_global = np.array((
+                      selection_global[0]+scale*sel_x1, selection_global[1]+scale*sel_y1,
+                      selection_global[0]+scale*sel_x2, selection_global[1]+scale*sel_y2))
 
-  crop_and_rotate_image()
   threshold.set(choose_threshold(region_PIL))
   log("Zoomed in.  Region size " + str(region_PIL.size[0]) + "x" +
                       str(region_PIL.size[1]))
-  process_image()
+  process_image() # this will crop and rotate
   # Reset selection rectangle
   input_canvas.delete("all")
   sel_rect_id = input_canvas.create_rectangle(0,0,0,0,
@@ -949,7 +953,7 @@ rotate_label.grid(row=3, columnspan=2)
 rotate_angle = tk.Scale(processed_frame, from_=-45, to=45,
                         orient=tk.HORIZONTAL, length=image_size)
 rotate_angle.grid(row=4, columnspan=2)
-rotate_angle.bind("<ButtonRelease-1>", lambda x: crop_and_rotate_image())
+rotate_angle.bind("<ButtonRelease-1>", lambda x: process_image())
 
 output_text = tk.Label(output_frame, text="Detected board position")
 output_text.grid(row=0, columnspan=2, pady=10)
