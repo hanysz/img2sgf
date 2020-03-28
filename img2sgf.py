@@ -1,4 +1,3 @@
-
 # Load/capture an image and convert to SGF
 # This file is in four parts:
 #   imports/setup
@@ -7,8 +6,6 @@
 #   create GUI and main loop
 
 # To do:
-#   fix rotaton: need to rotate original image, not region, to get rid of fill artefacts at edge of image
-#   implement reset_board()
 #   review checks for uneven grid spacing: too strict?
 #   if 21x21 grid found, omit outside edges, likely to be image borders
 #   bug fix: for ex1, threshold=116, complete_grid blows up, way too many vertical lines
@@ -99,7 +96,6 @@ image_loaded = False
 found_grid   = False
 valid_grid   = False
 board_ready  = False
-board_edited = False
 
 selection_local = np.array((0,0,0,0))
   # selection rectangle x1, y1, x2, y2 relative to current region
@@ -134,7 +130,7 @@ def process_image():
   # numpy images (_np) are used by other functions
   global threshold_hist, threshold_line
   # global so that other functions can move and redraw the line
-  global found_grid, valid_grid, board_ready, board_edited
+  global found_grid, valid_grid, board_ready
   # keep other functions informed of processing status
 
   if not image_loaded:
@@ -142,7 +138,6 @@ def process_image():
   found_grid   = False
   valid_grid   = False
   board_ready  = False
-  board_edited = False
 
   crop_and_rotate_image()
 
@@ -453,19 +448,20 @@ def average_intensity(i, j):
 
 
 def identify_board():
-  global board, stone_brightnesses, num_black_stones, num_white_stones
+  global detected_board, full_board, stone_brightnesses, \
+         num_black_stones, num_white_stones
 
-  board = np.zeros((BOARD_SIZE, BOARD_SIZE))
+  detected_board = np.zeros((BOARD_SIZE, BOARD_SIZE))
   num_black_stones, num_white_stones = 0,0
   for c in circles:
-    board[closest_grid_index(c[0:2])] = BoardStates.STONE
+    detected_board[closest_grid_index(c[0:2])] = BoardStates.STONE
 
-  num_stones = np.count_nonzero(board)
+  num_stones = np.count_nonzero(detected_board)
   stone_brightnesses = np.zeros(num_stones)
   i=0
   for j in range(hsize):
     for k in range(vsize):
-      if board[j,k] == BoardStates.STONE:
+      if detected_board[j,k] == BoardStates.STONE:
         stone_brightnesses[i] = average_intensity(j, k)
         i += 1
   num_black_stones = sum(stone_brightnesses <= black_stone_threshold)
@@ -482,10 +478,11 @@ def identify_board():
 
   for i in range(hsize):
     for j in range(vsize):
-      if board[i,j] == BoardStates.STONE:
+      if detected_board[i,j] == BoardStates.STONE:
         x = average_intensity(i, j)
-        board[i,j] = BoardStates.BLACK if x <= black_stone_threshold \
+        detected_board[i,j] = BoardStates.BLACK if x <= black_stone_threshold \
                                        else BoardStates.WHITE
+  full_board = detected_board.copy() # to do: fix for different alignments
 
 
 def find_grid():
@@ -493,6 +490,7 @@ def find_grid():
          hcentres, vcentres, hcentres_complete, vcentres_complete
   # All the above are needed as inputs to identify_board() --
   #   easier to make them global rather than pass them in and out
+
   hlines, vlines = find_all_lines()
   hcentres, vcentres = cluster_lines(hlines, vlines)
   valid_grid, circles, vsize, hsize, hcentres_complete, vcentres_complete, \
@@ -555,14 +553,17 @@ def choose_threshold(img):
 
 def initialise_parameters():
   # common to open_file() and screen_capture()
-  global region_PIL, image_loaded, found_grid, valid_grid, board_ready, board_edited, \
+  global region_PIL, image_loaded, found_grid, valid_grid, \
+         board_ready, board_edited, board_alignment, \
          previous_rotation_angle, black_stone_threshold, selection_global
 
   image_loaded = True
   found_grid   = False
   valid_grid   = False
   board_ready  = False
-  board_edited = False
+  save_button.configure(state=tk.DISABLED)
+  board_alignment = [Alignment.LEFT, Alignment.TOP]
+  reset_button.configure(state=tk.DISABLED)
   rotate_angle.set(0)
   previous_rotation_angle = 0
   contrast.set(contrast_default)
@@ -751,7 +752,7 @@ def save_SGF():
   else:
     output_file = filedialog.asksaveasfilename()
   sgf = open(output_file, "w")
-  sgf.write(to_SGF(board))
+  sgf.write(to_SGF(full_board))
   sgf.close()
 
 
@@ -786,9 +787,10 @@ def toggle_log(status = None):
 
 
 def reset_board():
-  global board_ready, save_button
-  board_ready = True # this won't be in the final version, it's just for initial testing
-  mb.showinfo("Reset", "There isn't a board position to reset yet!")
+  global full_board
+  full_board = detected_board.copy()
+  reset_button.configure(state=tk.DISABLED)
+  draw_board()
 
 
 def draw_images():
@@ -834,7 +836,7 @@ def draw_board():
   # but we can ignore the event because we get the new width/height from the canvas
   output_canvas.configure(bg="#d9d9d9")
   output_canvas.delete("all")
-  if not valid_grid:
+  if not board_ready:
     return
   output_canvas.configure(bg="#FFC050")
   w, h = output_canvas.winfo_width(), output_canvas.winfo_height()
@@ -857,9 +859,9 @@ def draw_board():
   for i in range(BOARD_SIZE):
     for j in range(BOARD_SIZE):
       x, y = coords[i], coords[j]
-      if board[i,j] == BoardStates.WHITE:
+      if full_board[i,j] == BoardStates.WHITE:
         output_canvas.create_oval(x-r, y-r, x+r, y+r, fill="white")
-      elif board[i,j] == BoardStates.BLACK:
+      elif full_board[i,j] == BoardStates.BLACK:
         output_canvas.create_oval(x-r, y-r, x+r, y+r, fill="black")
         
   # Positioning circles: these should only appear for part board positions
@@ -880,21 +882,22 @@ def edit_board(event):
   if cmin-grid_space/2 < x < cmax+grid_space/2 and \
      cmin-grid_space/2 < y < cmax+grid_space/2:
      i, j = round((x-cmin)/(cmax-cmin)*18), round((y-cmin)/(cmax-cmin)*18)
-     current_state = board[i,j]
+     current_state = full_board[i,j]
      if event.num == 1:  # left-click
        if current_state == BoardStates.EMPTY:
-         board[i,j] = BoardStates.WHITE
+         full_board[i,j] = BoardStates.WHITE
        elif current_state == BoardStates.WHITE:
-         board[i,j] = BoardStates.BLACK
+         full_board[i,j] = BoardStates.BLACK
        else:
-         board[i,j] = BoardStates.EMPTY
+         full_board[i,j] = BoardStates.EMPTY
      if event.num == 3:  # right-click
        if current_state == BoardStates.EMPTY:
-         board[i,j] = BoardStates.BLACK
+         full_board[i,j] = BoardStates.BLACK
        elif current_state == BoardStates.BLACK:
-         board[i,j] = BoardStates.WHITE
+         full_board[i,j] = BoardStates.WHITE
        else:
-         board[i,j] = BoardStates.EMPTY
+         full_board[i,j] = BoardStates.EMPTY
+     reset_button.configure(state=tk.ACTIVE)
      draw_board()
 
   else:
@@ -980,7 +983,8 @@ rotate_angle.bind("<ButtonRelease-1>", lambda x: process_image())
 
 output_text = tk.Label(output_frame, text="Detected board position")
 output_text.grid(row=0, columnspan=2, pady=10)
-reset_button = tk.Button(output_frame, text="reset", command = reset_board)
+reset_button = tk.Button(output_frame, text="reset",
+                         command = reset_board, state = tk.DISABLED)
 reset_button.grid(row=1, column=0)
 save_button = tk.Button(output_frame, text="save",
                         command = save_SGF, state = tk.DISABLED)
