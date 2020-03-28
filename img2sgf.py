@@ -9,10 +9,7 @@
 #   review checks for uneven grid spacing: too strict?
 #   make settings pane properly resizable
 #   get rid of edge detection parameters, they don't help
-#   add stone detection info to log
-#   alternative detection method for white stones? Or did the contrast change fix it
 # Future enhancements
-#   handle part board positions, i.e. corner/side diagrams
 #   problem with L19 diagrams (and others): stones close together don't get detected as circles.  May need to replace Hough circle detection with contour detection?
 
 # Part 1: imports/setup
@@ -58,8 +55,8 @@ main_width = 3*image_size + 4*border_size
 main_height = image_size + header_size + 3*border_size
 
 settings_width = 900
-s_width=400 # width of sliders in the settings window
-settings_height = 750
+s_width = 400 # width of frames within settings window
+settings_height = 500
 settings_visible = False
 
 log_width = 650
@@ -127,6 +124,7 @@ def process_image():
   valid_grid   = False
   board_ready  = False
 
+  log("\nProcessing image")
   crop_and_rotate_image()
 
   if rotate_angle.get() != 0:
@@ -880,6 +878,14 @@ def draw_board():
   output_canvas.configure(bg="#d9d9d9")
   output_canvas.delete("all")
   if not board_ready:
+    if image_loaded:
+      output_canvas.create_text((0,0), text="Board not detected!", anchor="nw")
+      output_canvas.create_text((0,30), text="Things to try:", anchor="nw")
+      output_canvas.create_text((0,60), text="- Select a smaller region", anchor="nw")
+      output_canvas.create_text((0,90), text="- Rotate the image", anchor="nw")
+      output_canvas.create_text((0,120), text="- Show settings", anchor="nw")
+      output_canvas.create_text((0,150), text="  -> Increase contrast", anchor="nw")
+      output_canvas.create_text((0,180), text="  -> Increase threshold", anchor="nw")
     return
   output_canvas.configure(bg="#FFC050")
   w, h = output_canvas.winfo_width(), output_canvas.winfo_height()
@@ -1044,8 +1050,10 @@ rotate_label = tk.Label(processed_frame, text="rotate")
 rotate_label.grid(row=3, columnspan=2)
 rotate_angle = tk.Scale(processed_frame, from_=-45, to=45,
                         orient=tk.HORIZONTAL, length=image_size)
-rotate_angle.grid(row=4, columnspan=2)
+rotate_angle.grid(row=4, columnspan=2, sticky="ew")
 rotate_angle.bind("<ButtonRelease-1>", lambda x: process_image())
+
+processed_frame.columnconfigure(0, weight=1)
 
 output_text = tk.Label(output_frame, text="Detected board position")
 output_text.grid(row=0, columnspan=2, pady=10)
@@ -1092,39 +1100,40 @@ settings_window.geometry(str(settings_width) + "x" + str(settings_height))
 settings_window.protocol("WM_DELETE_WINDOW", lambda : toggle_settings(False))
 
 settings1 = tk.Frame(settings_window)
-settings1.grid(row=0, column=0, sticky="n")
+settings1.grid(row=0, column=0, sticky="nsew", padx=(0,5))
 settings2 = tk.Frame(settings_window)
-settings2.grid(row=0, column=1, sticky="n")
+settings2.grid(row=0, column=1, sticky="nsew", padx=(5,0))
 
 contrast_label = tk.Label(settings1, text="Contrast")
-contrast_label.grid(row=1) # later put this at the top, move everything else down
-contrast = tk.Scale(settings1, from_=0, to=100, orient=tk.HORIZONTAL, length=s_width)
+contrast_label.grid(row=0, sticky="nsew")
+contrast = tk.Scale(settings1, from_=0, to=100, orient=tk.HORIZONTAL)
 contrast.set(50)
-contrast.grid(row=2)
+contrast.grid(row=1, padx=15, sticky="nsew")
 contrast.bind("<ButtonRelease-1>", lambda x: process_image())
 brightness_label = tk.Label(settings1, text="Brightness")
-brightness_label.grid(row=3)
-brightness = tk.Scale(settings1, from_=0, to=100, orient=tk.HORIZONTAL, length=s_width)
+brightness_label.grid(row=2, padx=15, sticky="nsew")
+brightness = tk.Scale(settings1, from_=0, to=100, orient=tk.HORIZONTAL)
 brightness.set(50)
-brightness.grid(row=4, pady=(0,40))
+brightness.grid(row=3, padx=15, sticky="nsew")
 brightness.bind("<ButtonRelease-1>", lambda x: process_image())
 
+# Edge detection parameters hidden: they don't seem to help
 edge_label = tk.Label(settings1, text="Canny edge detection parameters")
-edge_label.grid(row=5, pady=15)
+#edge_label.grid(row=5, pady=15)
 edge_min_label = tk.Label(settings1, text="min threshold")
-edge_min_label.grid(row=6)
-edge_min = tk.Scale(settings1, from_=0, to=255, orient=tk.HORIZONTAL, length=s_width)
+#edge_min_label.grid(row=6)
+edge_min = tk.Scale(settings1, from_=0, to=255, orient=tk.HORIZONTAL)
 edge_min.set(edge_min_default)
-edge_min.grid(row=7)
-edge_min.bind("<ButtonRelease-1>", lambda x: process_image())
+#edge_min.grid(row=7)
+#edge_min.bind("<ButtonRelease-1>", lambda x: process_image())
 edge_max_label = tk.Label(settings1, text="max threshold")
-edge_max_label.grid(row=8, pady=(20,0))
-edge_max = tk.Scale(settings1, from_=0, to=255, orient=tk.HORIZONTAL, length=s_width)
+#edge_max_label.grid(row=8, pady=(20,0))
+edge_max = tk.Scale(settings1, from_=0, to=255, orient=tk.HORIZONTAL)
 edge_max.set(edge_max_default)
-edge_max.grid(row=9)
-edge_max.bind("<ButtonRelease-1>", lambda x: process_image())
+#edge_max.grid(row=9)
+#edge_max.bind("<ButtonRelease-1>", lambda x: process_image())
 sobel_label = tk.Label(settings1, text="Sobel aperture")
-sobel_label.grid(row=10, pady=(20,0))
+#sobel_label.grid(row=10, pady=(20,0))
 def odd_only(n):
   # Restrict Sobel value scale to odd numbers
   # Thanks to https://stackoverflow.com/questions/20710514/selecting-odd-values-using-tkinter-scale for the hack
@@ -1137,48 +1146,63 @@ def odd_only(n):
 sobel = tk.Scale(settings1, from_=3, to=7, orient=tk.HORIZONTAL,
            command=odd_only, length=100)
 sobel.set(sobel_default)
-sobel.grid(row=11)
-sobel.bind("<ButtonRelease-1>", lambda x: process_image())
+#sobel.grid(row=11)
+#sobel.bind("<ButtonRelease-1>", lambda x: process_image())
 gradient_label = tk.Label(settings1, text="gradient")
 gradient = tk.IntVar() # choice of gradient for Canny edge detection
 gradient.set(gradient_default)
-gradient_label.grid(row=12, pady=(20,0))
+#gradient_label.grid(row=12, pady=(20,0))
 gradientL1 = tk.Radiobutton(settings1, text="L1 norm", variable=gradient, value=1,
                             command=process_image)
-gradientL1.grid(row=13)
+#gradientL1.grid(row=13)
 gradientL2 = tk.Radiobutton(settings1, text="L2 norm", variable=gradient, value=2,
                             command=process_image)
-gradientL2.grid(row=14)
+#gradientL2.grid(row=14)
 
 
 threshold_label = tk.Label(settings2,
                            text="line detection threshold\nfor Hough transform")
-threshold_label.grid(row=0, pady=10)
-threshold = tk.Scale(settings2, from_=1, to=500, orient=tk.HORIZONTAL, length=s_width)
+threshold_label.grid(row=0, pady=(40,0), padx=15, sticky="nsew")
+threshold = tk.Scale(settings2, from_=1, to=500, orient=tk.HORIZONTAL)
 threshold.set(threshold_default)
-threshold.grid(row=1, pady=(0,10))
+threshold.grid(row=1, pady=(7,71), padx=15, sticky="nsew")
 threshold.bind("<ButtonRelease-1>", lambda x: process_image())
 
 fig1 = Figure(figsize=(3,2), dpi=round(s_width/3))
 lines_plot = fig1.add_subplot(1, 1, 1)
 lines_plot.axis('off')
 threshold_plot = FigureCanvasTkAgg(fig1, master=settings2)
-threshold_plot.get_tk_widget().grid(row=2)
+threshold_plot.get_tk_widget().grid(row=2, padx=15, sticky="nsew")
 
-black_thresh_label = tk.Label(settings2, text="black stone detection")
-black_thresh_label.grid(row=3, pady=(50,20))
+# With the edge detection parameters hidden,
+# we get a nicer layout by putting the threshold histogram
+# on settings1 not settings2
+black_thresh_label = tk.Label(settings1, text="black stone detection")
+black_thresh_label.grid(row=4, pady=(30,20), padx=15, sticky="nsew")
 fig2 = Figure(figsize=(3,2), dpi=round(s_width/3))
 stone_brightness_hist = fig2.add_subplot(1, 1, 1)
 threshold_line = None # later, this will be set to the marker line on the histogram
-black_thresh_hist = FigureCanvasTkAgg(fig2, master=settings2)
+black_thresh_hist = FigureCanvasTkAgg(fig2, master=settings1)
 black_thresh_canvas = black_thresh_hist.get_tk_widget()
-black_thresh_canvas.grid(row=4)
+black_thresh_canvas.grid(row=5, padx=15, sticky="nsew")
 black_thresh_canvas.bind('<Button-1>', set_black_thresh)
 black_thresh_canvas.bind('<B1-Motion>', set_black_thresh)
 black_thresh_canvas.bind('<ButtonRelease-1>', apply_black_thresh)
 
+settings_window.rowconfigure(0, weight=1)
+settings_window.rowconfigure(1, weight=1)
 settings_window.columnconfigure(0, weight=1)
 settings_window.columnconfigure(1, weight=1)
+
+for i in range(5):
+  settings1.rowconfigure(i, weight=0) # top rows not resizable
+settings1.rowconfigure(5, weight=1) # histogram should resize
+settings1.columnconfigure(0, weight=1)
+
+for i in range(2):
+  settings2.rowconfigure(i, weight=0) # top rows not resizable
+settings2.rowconfigure(2, weight=1) # lines plot should resize
+settings2.columnconfigure(0, weight=1)
 
 settings_window.withdraw()
 
