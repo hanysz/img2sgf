@@ -56,7 +56,7 @@ maxblur = 3 # make four blurred images (blur=1, 3, 5, 7) for circle detection
 angle_tolerance = 1.0 # accept lines up to 1 degree away from horizontal or vertical
 angle_delta = math.pi/180*angle_tolerance
 min_grid_spacing = 10
-grid_tolerance = 0.2 # accept uneven grid spacing by 20%
+big_space_ratio = 1.6 # try to fill in grid spaces that are >1.6 * min spacing
 contrast_default = 70 # by default, raise the contrast a bit, it often seems to help!
 brightness_default = 50 # don't change brightness
 
@@ -116,9 +116,6 @@ def crop_and_rotate_image():
   rotation_centre = tuple(rectangle_centre(selection_global))
   region_PIL = input_image_PIL.rotate(angle=-rotate_angle.get(), fillcolor="white",
                                  center = rotation_centre).crop(selection_global)
-
-  # Set line detection threshold appropriate for this image size:
-  threshold.set(choose_threshold(region_PIL))
 
 
 def process_image():
@@ -344,7 +341,7 @@ def complete_grid(x):
   if min_space < min_grid_spacing:
     log("Grid lines are too close together: minimum spacing is " + str(min_space) + "     pixels")
     return None
-  bound = min_space * (1 + grid_tolerance*2)
+  bound = min_space * big_space_ratio
   big_spaces = spaces[spaces > bound]
   if len(big_spaces)==0: # no gaps!
     log("Got a complete grid of " + str(len(x)) + " lines")
@@ -360,16 +357,14 @@ def complete_grid(x):
   n = len(small_spaces)
   for s in big_spaces:
     m = s/average_space
-    if max(m/round(m), round(m)/m) > 1+grid_tolerance:
-      log("Uneven grid: found " + str(len(x)) + " lines including a gap of " +
-           str(m) + " times average space")
-      return None
     n += int(round(m))
-  if n > BOARD_SIZE:
-    log("Grid size is " + str(n) + ", too big!")
+  if n > BOARD_SIZE + 2:
+    log("Distance between edges of grid is " + str(n) +
+        " times minimum space.")
+    log("Extra lines on diagram, or a grid line detected twice?")
     return None
 
-  # Now we know we have a valid grid.  Let's fill in the gaps.
+  # Now we know we have a valid grid (except maybe too big).  Let's fill in the gaps.
   n += 1 # need to increment because one gap equals two grid lines, two gaps=three lines  etc
   log("Got " + str(len(x)) + " lines within a grid of size " + str(n))
   if len(x) < n:
@@ -393,15 +388,38 @@ def complete_grid(x):
     return x
 
 
+def truncate_grid(x):
+  # x is a vector of grid coordinates as for complete_grid()
+  # if size of x exceed board size by 1 or 2,
+  # the extra lines are likely to be a bounding box, board edge or text
+  # so we should drop them
+  if x is None:
+    return None
+  if len(x) == BOARD_SIZE + 2:
+    # two extra lines are likely to be a bounding box or board edges in the image
+    # so let's drop them
+    log("Dropping two extra lines at the outsides of the grid")
+    return(x[1:-1])
+  if len(x) == BOARD_SIZE + 1:
+    # most likely scenario is horizontal lines with a diagram caption underneath,
+    # and the text is recognised as an extra line
+    log("Dropping one extra line at the end of the grid")
+    return(x[:-1])
+  return(x)
+
+
 def validate_grid(hcentres, vcentres):
   log("Assessing horizontal lines.")
   hcentres_complete = complete_grid(hcentres)
+  hcentres_complete = truncate_grid(hcentres_complete)
   if hcentres_complete is None:
-    return [False, circles] + 6*[None]
+    return [False, circles, 0, 0] + 4*[None]
   log("Assessing vertical lines.")
   vcentres_complete = complete_grid(vcentres)
+  vcentres_complete = truncate_grid(vcentres_complete)
   if vcentres_complete is None:
-    return [False, circles] + 6*[None]
+    return [False, circles, 0, 0] + 4*[None]
+
   # Later we'll need the grid size and average spacing
   vsize, hsize = len(hcentres_complete), len(vcentres_complete)
   # Note: number of *horizontal* lines is the *vertical* sides of the board!
@@ -507,6 +525,11 @@ def find_grid():
       lines_plot.plot((x,x), (ymin, ymax), "red", linewidth=1)
     threshold_plot.draw()
       
+  if hsize > BOARD_SIZE:
+    log("Too many vertical lines!")
+  elif vsize > BOARD_SIZE:
+    log("Too many horizontal lines!")
+  else:
     identify_board()
     board_ready = True
     save_button.configure(state=tk.ACTIVE)
@@ -655,6 +678,9 @@ def select_region():
   new_hsize = selection_global[2]-selection_global[0]
   new_vsize = selection_global[3]-selection_global[1]
   log("Zoomed in.  Region size " + str(new_hsize) + "x" + str(new_vsize))
+
+  # Set line detection threshold appropriate for this image size:
+  threshold.set(choose_threshold(region_PIL))
 
   process_image() # this will crop and rotate
 
