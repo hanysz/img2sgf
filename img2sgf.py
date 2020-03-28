@@ -7,19 +7,11 @@
 
 # To do:
 #   review checks for uneven grid spacing: too strict?
-#   bug fix: for ex1, threshold=116, complete_grid blows up, way too many vertical lines
-#   bug fix: for ex7, threshold=84, seem to be getting off-by-one error with placement of several stones.  ex17 similar
-#   bug fix: for ex9 (corner position), stones at right edge of board are missing even though circles are detected?
-#   bug fix: ex10, threshold 48 is detecting several extra stones!
-#            ex14 extra stone on left, same issue?
-#   bug fix: zoom in doesn't always display zoomed image if grid not detected
-#   for ex16, why is it getting the image edge as an extra line??  Grid better with threshold>250 but problem with stone colours and off-by-one placements.  Thin paper, lines from the other side showing through?
 #   make settings pane properly resizable
 #   get rid of edge detection parameters, they don't help
 #   add stone detection info to log
-#   alternative detection method for white stones
+#   alternative detection method for white stones? Or did the contrast change fix it
 # Future enhancements
-#   set board size=19 as fixed (be consistent!); throw error if size>19
 #   handle part board positions, i.e. corner/side diagrams
 #   problem with L19 diagrams (and others): stones close together don't get detected as circles.  May need to replace Hough circle detection with contour detection?
 
@@ -469,11 +461,23 @@ def average_intensity(i, j):
   return np.mean(grey_image_np[ymin:ymax, xmin:xmax]) #nb flip x,y for np indexing
 
 
+def align_board(b, a):
+  # b is a part board, a is an alignment (top, left, etc)
+  # return a full board with b in the appropriate side/quadrant
+  board = np.zeros((BOARD_SIZE, BOARD_SIZE))
+  
+  xoffset = BOARD_SIZE - hsize if a[0] == Alignment.RIGHT else 0
+  yoffset = BOARD_SIZE - vsize if a[1] == Alignment.BOTTOM else 0
+  for i in range(hsize):
+    for j in range(vsize):
+      board[i+xoffset, j+yoffset] = b[i,j]
+  return(board) # to be continued...
+
 def identify_board():
   global detected_board, full_board, stone_brightnesses, \
          num_black_stones, num_white_stones
 
-  detected_board = np.zeros((BOARD_SIZE, BOARD_SIZE))
+  detected_board = np.zeros((hsize, vsize))
   num_black_stones, num_white_stones = 0,0
   for c in circles:
     detected_board[closest_grid_index(c[0:2])] = BoardStates.STONE
@@ -487,7 +491,15 @@ def identify_board():
         stone_brightnesses[i] = average_intensity(j, k)
         i += 1
   num_black_stones = sum(stone_brightnesses <= black_stone_threshold)
+  black_text = str(num_black_stones) + " black stone"
+  if num_black_stones != 1:
+    black_text += "s"
   num_white_stones = num_stones - num_black_stones
+  white_text = str(num_white_stones) + " white stone"
+  if num_white_stones != 1:
+    white_text += "s"
+  log("Detected " + black_text + " and " + white_text + " on a "
+                  + str(hsize) + "x" + str(vsize) + " board.")
 
   # Guess whose move it is based on stone count:
   # this will sometimes be wrong because of handicaps, captures, part board positions
@@ -504,7 +516,7 @@ def identify_board():
         x = average_intensity(i, j)
         detected_board[i,j] = BoardStates.BLACK if x <= black_stone_threshold \
                                        else BoardStates.WHITE
-  full_board = detected_board.copy() # to do: fix for different alignments
+  full_board = align_board(detected_board.copy(), board_alignment)
 
 
 def find_grid():
@@ -537,7 +549,7 @@ def find_grid():
       identify_board()
       board_ready = True
       save_button.configure(state=tk.ACTIVE)
-    draw_board() # if board_ready is false, this will blank out the board
+  draw_board() # if board_ready is false, this will blank out the board
 
 
 def get_scale(img, c):
@@ -819,7 +831,7 @@ def toggle_log(status = None):
 
 def reset_board():
   global full_board
-  full_board = detected_board.copy()
+  full_board = align_board(detected_board, board_alignment)
   reset_button.configure(state=tk.DISABLED)
   draw_board()
 
@@ -896,14 +908,23 @@ def draw_board():
         output_canvas.create_oval(x-r, y-r, x+r, y+r, fill="black")
         
   # Positioning circles: these should only appear for part board positions
-  #for i in [15, coords[9], width+45]:
-  #  for j in [15, coords[9], width+45]:
-  #    if i!=coords[9] or j!=coords[9]:
-  #      output_canvas.create_oval(i-2, j-2, i+2, j+2, fill="pink")
-  #      output_canvas.create_oval(i-8, j-8, i+8, j+8)
+  pos_centres = []
+  if hsize < BOARD_SIZE and vsize < BOARD_SIZE:
+    # corner position
+    pos_centres = [(15,15), (15,width+45), (width+45,15), (width+45,width+45)]
+  elif hsize < BOARD_SIZE:
+    # left or right size position
+    pos_centres = [(15, coords[9]), (width+45, coords[9])]
+  elif vsize < BOARD_SIZE:
+    # top or bottom position
+    pos_centres = [(coords[9], 15), (coords[9], width+45)]
+  for i, j in pos_centres:
+     output_canvas.create_oval(i-2, j-2, i+2, j+2, fill="pink")
+     output_canvas.create_oval(i-8, j-8, i+8, j+8)
 
 
 def edit_board(event):
+  global board_alignment, full_board
   if not board_ready:
     return
   x,y = event.x, event.y
@@ -929,13 +950,27 @@ def edit_board(event):
        else:
          full_board[i,j] = BoardStates.EMPTY
      reset_button.configure(state=tk.ACTIVE)
-     draw_board()
 
   else:
     # Clicked outside the board
-    # To do: if we've got a corner/side position not a full board,
-    # check for clicks on the positioning dots
-    pass
+    # If we've got a corner/side position not a full board,
+    # check for clicks near the positioning dots
+    c1, c2 = min(w,h)/2-12, min(w,h)/2+12
+    old_alignment = board_alignment.copy()
+    if hsize < BOARD_SIZE and vsize < BOARD_SIZE:
+      if not (cmin<x<cmax or cmin<y<cmax): # ignore clicks away from the corners
+        board_alignment[0] = Alignment.LEFT if x<cmin else Alignment.RIGHT
+        board_alignment[1] = Alignment.TOP  if y<cmin else Alignment.BOTTOM
+    elif vsize < BOARD_SIZE and c1<x<c2: # only respond to click at top or bottom
+      board_alignment[1] = Alignment.TOP  if y<cmin else Alignment.BOTTOM
+    elif hsize < BOARD_SIZE and c1<y<c2: # only respond to click at left or right
+      board_alignment[0] = Alignment.LEFT if x<cmin else Alignment.RIGHT
+    if board_alignment != old_alignment:
+      full_board = align_board(detected_board, board_alignment)
+      reset_button.configure(state=tk.DISABLED)
+      # Sorry, moving the board will wipe out any other added/removed stones, can't undo
+
+  draw_board()
 
 
 # Part 4: create GUI and main loop
@@ -1025,7 +1060,7 @@ output_instructions = tk.Label(output_frame,
 '''Click on board to change between empty,
 black stone and white stone.
 
-To do: For side/corner positions,
+For side/corner positions,
 click on circle outside board
 to choose which side/corner.
 ''')
