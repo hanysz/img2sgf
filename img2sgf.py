@@ -7,7 +7,6 @@
 
 # To do:
 #   review checks for uneven grid spacing: too strict?
-#   if 21x21 grid found, omit outside edges, likely to be image borders
 #   bug fix: for ex1, threshold=116, complete_grid blows up, way too many vertical lines
 #   bug fix: for ex7, threshold=84, seem to be getting off-by-one error with placement of several stones.  ex17 similar
 #   bug fix: for ex9 (corner position), stones at right edge of board are missing even though circles are detected?
@@ -462,6 +461,11 @@ def average_intensity(i, j):
   xmin, xmax = int(round(x-hspace/2)), int(round(x+hspace/2))
   y = hcentres_complete[j]
   ymin, ymax = int(round(y-vspace/2)), int(round(y+vspace/2))
+  # Truncate coordinates to stay in bounds: sometimes circles can go outside the image
+  xmin = max(0, xmin)
+  ymin = max(0, ymin)
+  xmax = min(grey_image_np.shape[1], xmax)
+  ymax = min(grey_image_np.shape[0], ymax)
   return np.mean(grey_image_np[ymin:ymax, xmin:xmax]) #nb flip x,y for np indexing
 
 
@@ -525,15 +529,15 @@ def find_grid():
       lines_plot.plot((x,x), (ymin, ymax), "red", linewidth=1)
     threshold_plot.draw()
       
-  if hsize > BOARD_SIZE:
-    log("Too many vertical lines!")
-  elif vsize > BOARD_SIZE:
-    log("Too many horizontal lines!")
-  else:
-    identify_board()
-    board_ready = True
-    save_button.configure(state=tk.ACTIVE)
-  draw_board() # if board_ready is false, this will blank out the board
+    if hsize > BOARD_SIZE:
+      log("Too many vertical lines!")
+    elif vsize > BOARD_SIZE:
+      log("Too many horizontal lines!")
+    else:
+      identify_board()
+      board_ready = True
+      save_button.configure(state=tk.ACTIVE)
+    draw_board() # if board_ready is false, this will blank out the board
 
 
 def get_scale(img, c):
@@ -669,14 +673,15 @@ def select_region():
   print(rotation_matrix)
   selection_global += (-xdelta, ydelta, -xdelta, ydelta)
 
-  # Make sure we haven't pushed the selection rectangle out of bounds:
-  selection_global[0] = max(selection_global[0], 0)
-  selection_global[1] = max(selection_global[1], 0)
-  selection_global[2] = min(selection_global[2], input_image_PIL.size[0])
-  selection_global[3] = min(selection_global[3], input_image_PIL.size[1])
+  # Make sure we haven't pushed the selection rectangle out of bounds,
+  # and round to whole numbers
+  selection_global[0] = round(max(selection_global[0], 0))
+  selection_global[1] = round(max(selection_global[1], 0))
+  selection_global[2] = round(min(selection_global[2], input_image_PIL.size[0]))
+  selection_global[3] = round(min(selection_global[3], input_image_PIL.size[1]))
 
-  new_hsize = selection_global[2]-selection_global[0]
-  new_vsize = selection_global[3]-selection_global[1]
+  new_hsize = int(selection_global[2]-selection_global[0])
+  new_vsize = int(selection_global[3]-selection_global[1])
   log("Zoomed in.  Region size " + str(new_hsize) + "x" + str(new_vsize))
 
   # Set line detection threshold appropriate for this image size:
