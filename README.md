@@ -22,16 +22,17 @@ The right hand pane is a simple board editor for you to fix up any mistakes.
 First you need to install some dependencies.  Then you should be able to download the single file [img2sgf.py](https://github.com/hanysz/img2sgf/raw/master/img2sgf.py) and run it.
 
 ##Dependencies
+
 * Python 3
-..* On Linux or Macintosh, you probably have it preinstalled.
-..* For Windows, probably the easiest way to get it is from [Anaconda](https://docs.anaconda.com/anaconda/install/windows/).
+  * On Linux or Macintosh, you probably have it preinstalled.
+  * For Windows, probably the easiest way to get it is from [Anaconda](https://docs.anaconda.com/anaconda/install/windows/).
 * Open CV image processing library.
-..* [Windows instructions] (https://docs.opencv.org/master/d3/d52/tutorial_windows_install.html).
-..* [Linux instructions](https://askubuntu.com/questions/783956/how-to-install-opencv-3-1-for- python-3-5-on-ubuntu-16-04-lts): several possible methods, choose what's best for your flavour of Linux, make sure you get the Python 3 version.
-..* [Macintosh instructions](https://docs.opencv.org/master/d0/db2/tutorial_macos_install.html), again make sure you've got Python 3 not Python 2.
-* Various Python packages.  Some of these may come preinstalled with Anaconda..
-..* Tkinter, numpy, matplotlib, sklearn, PIL.
-..* for Linux, you also need pyscreenshot.
+  * [Windows instructions](https://docs.opencv.org/master/d3/d52/tutorial_windows_install.html).
+  * [Linux instructions](https://askubuntu.com/questions/783956/how-to-install-opencv-3-1-for- python-3-5-on-ubuntu-16-04-lts): several possible methods, choose what's best for your flavour of Linux, make sure you get the Python 3 version.
+  * [Macintosh instructions](https://docs.opencv.org/master/d0/db2/tutorial_macos_install.html), again make sure you've got Python 3 not Python 2.
+* Various Python packages.  Some of these may come preinstalled with Anaconda.
+  * Tkinter, numpy, matplotlib, sklearn, PIL.
+  * for Linux, you also need pyscreenshot.
 
 Sorry about the painful installation process!  I do most of my work on Linux, so I'm not well equipped to make a nicely packaged Windows installer.  If anyone else is willing and able to do this, please let me know!
 
@@ -50,7 +51,7 @@ Sorry about the painful installation process!  I do most of my work on Linux, so
 
 # How it works
 
-* To do: add details! *
+*To do: add details!*
 
 ## Preprocessing
 
