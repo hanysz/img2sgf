@@ -1,4 +1,9 @@
 # Load/capture an image and convert to SGF
+# Alexander Hanysz, March 2020
+# https://github.com/hanysz/img2sgf
+# Written for personal use, largely to learn about OpenCV
+# Distributed without warranty, use at your own risk!
+
 # This file is in four parts:
 #   imports/setup
 #   image processing functions
@@ -6,11 +11,9 @@
 #   create GUI and main loop
 
 # To do:
-#   review checks for uneven grid spacing: too strict?
-#   make settings pane properly resizable
-#   get rid of edge detection parameters, they don't help
 # Future enhancements
 #   problem with L19 diagrams (and others): stones close together don't get detected as circles.  May need to replace Hough circle detection with contour detection?
+
 
 # Part 1: imports/setup
 
@@ -34,7 +37,7 @@ import os, sys, math, string
 
 BOARD_SIZE = 19
 threshold_default = 80 # line detection votes threshold
-black_stone_threshold_default = 155 # brightness on a scale of 0-255
+black_stone_threshold_default = 128 # brightness on a scale of 0-255
 black_stone_threshold = black_stone_threshold_default
 edge_min_default = 50 # edge detection min threshold
 edge_max_default = 200
@@ -129,26 +132,35 @@ def process_image():
 
   if rotate_angle.get() != 0:
     log("Rotated by " + str(rotate_angle.get()) + " degrees")
+
+  log("Contrast = " + str(contrast.get()))
   scaled_contrast = 102/(101-contrast.get())-1
   # convert range 0-100 into range 0.01-101, with 50->1.0
   region_PIL = ImageEnhance.Contrast(region_PIL).enhance(scaled_contrast)
+
+  log("Brightness = " + str(brightness.get()))
   scaled_brightness = 450/(200-brightness.get())-2
   # convert range 0-100 into range 0.25-2.5, with 50->1.0
   region_PIL = ImageEnhance.Brightness(region_PIL).enhance(scaled_brightness)
   input_image_np = np.array(region_PIL)
+
   log("Converting to greyscale")
   grey_image_np = cv.cvtColor(input_image_np, cv.COLOR_BGR2GRAY)
-  log("Running Canny edge detection algorithm with parameters:\n" +
-      "- min threshold=" + str(edge_min.get()) + "\n" +
-      "- max threshold=" + str(edge_max.get()) + "\n" +
-      "- Sobel aperture size=" + str(sobel.get()) + "\n" +
-      "- L" + str(gradient.get()) + " norm")
+
+  #log("Running Canny edge detection algorithm with parameters:\n" +
+  #    "- min threshold=" + str(edge_min.get()) + "\n" +
+  #    "- max threshold=" + str(edge_max.get()) + "\n" +
+  #    "- Sobel aperture size=" + str(sobel.get()) + "\n" +
+  #    "- L" + str(gradient.get()) + " norm")
+  log("Running Canny edge detection algorithm")
+  # no point logging the parameters now I've turned off the UI for changing them
   edge_detected_image_np = cv.Canny(input_image_np,
                               edge_min.get(), edge_max.get(),
                               apertureSize = sobel.get(),
                               L2gradient = (gradient.get()==2))
   edge_detected_image_PIL = Image.fromarray(edge_detected_image_np)
 
+  log("Detecting circles")
   circles_removed_image_np = edge_detected_image_np.copy()
     # Make a few different blurred versions of the image, so we can find most of the circles
   blurs = [grey_image_np, edge_detected_image_np]
@@ -186,25 +198,26 @@ def process_image():
   draw_images()
   draw_histogram(stone_brightnesses) # this should erase the histogram from any previous board
 
+
 def draw_histogram(stone_brightnesses):
   global threshold_hist, threshold_line
 
-  stone_brightness_hist.clear()
+  black_thresh_subfigure.clear()
   if not board_ready:
     black_thresh_hist.draw()
     return
-  threshold_hist = stone_brightness_hist.hist(stone_brightnesses, bins=20,
+  threshold_hist = black_thresh_subfigure.hist(stone_brightnesses, bins=20,
                                               range=[0,255], color='pink')
   max_val = max(threshold_hist[0])
   if threshold_line is not None:
     threshold_line[0].remove() # remove old line before redrawing
-  threshold_line = stone_brightness_hist.plot(2*[black_stone_threshold], [0,max_val],
+  threshold_line = black_thresh_subfigure.plot(2*[black_stone_threshold], [0,max_val],
                                               color='red')
-  stone_brightness_hist.text(black_stone_threshold, max_val*0.95,
+  black_thresh_subfigure.text(black_stone_threshold, max_val*0.95,
                              str(black_stone_threshold), fontsize=8)
-  stone_brightness_hist.text(black_stone_threshold-70, max_val*0.8,
+  black_thresh_subfigure.text(black_stone_threshold-70, max_val*0.8,
                              str(num_black_stones) + " black", fontsize=8)
-  stone_brightness_hist.text(black_stone_threshold+10, max_val*0.8,
+  black_thresh_subfigure.text(black_stone_threshold+10, max_val*0.8,
                              str(num_white_stones) + " white", fontsize=8)
   black_thresh_hist.draw()
 
@@ -212,6 +225,8 @@ def draw_histogram(stone_brightnesses):
 def find_lines(threshold, direction):
   # Lines are assumed to be horizontal or vertical
   # Return value is a vector of x- or y-intercepts
+  # Remember that horizontal lines intercept the y-axis,
+  #   be careful not to get x and y the wrong way round!
   if direction == Direction.H:
     lines = cv.HoughLines(circles_removed_image_np, rho=1, theta=math.pi/180.0, \
                           threshold=threshold, min_theta = math.pi/2 - angle_delta, \
@@ -286,23 +301,23 @@ def cluster_lines(hlines, vlines):
             + str(hsize_initial) + " vertical grid lines")
 
   colours = 10*['r','g','b','c','k','y','m']
-  lines_plot.clear()
+  threshold_subfigure.clear()
 
   if len(hlines)>0:
     ymin, ymax = min(hlines), max(hlines)
     if hclusters is not None:
       for i in range(len(hlines)):
-        lines_plot.plot(ymin, hlines[i], color=colours[hclusters.labels_[i]], marker=".")
+        threshold_subfigure.plot(ymin, hlines[i], color=colours[hclusters.labels_[i]], marker=".")
     for x in vcentres:
-      lines_plot.plot((x,x), (ymin, ymax), "green", linewidth=1)
+      threshold_subfigure.plot((x,x), (ymin, ymax), "green", linewidth=1)
 
   if len(vlines)>0:
     xmin, xmax = min(vlines), max(vlines)
     if vclusters is not None:
       for i in range(len(vlines)):
-        lines_plot.plot(vlines[i], xmin, color=colours[vclusters.labels_[i]], marker=".")
+        threshold_subfigure.plot(vlines[i], xmin, color=colours[vclusters.labels_[i]], marker=".")
     for y in hcentres:
-      lines_plot.plot((xmin, xmax), (y,y), color="green", linewidth=1)
+      threshold_subfigure.plot((xmin, xmax), (y,y), color="green", linewidth=1)
 
   threshold_plot.draw()
 
@@ -399,11 +414,13 @@ def truncate_grid(x):
 
 def validate_grid(hcentres, vcentres):
   log("Assessing horizontal lines.")
+  hcentres = truncate_grid(hcentres)
   hcentres_complete = complete_grid(hcentres)
   hcentres_complete = truncate_grid(hcentres_complete)
   if hcentres_complete is None:
     return [False, circles, 0, 0] + 4*[None]
   log("Assessing vertical lines.")
+  vcentres = truncate_grid(vcentres)
   vcentres_complete = complete_grid(vcentres)
   vcentres_complete = truncate_grid(vcentres_complete)
   if vcentres_complete is None:
@@ -469,12 +486,14 @@ def align_board(b, a):
   for i in range(hsize):
     for j in range(vsize):
       board[i+xoffset, j+yoffset] = b[i,j]
-  return(board) # to be continued...
+  return(board)
+
 
 def identify_board():
   global detected_board, full_board, stone_brightnesses, \
          num_black_stones, num_white_stones
 
+  log("Guessing stone colours based on a threshold of " + str(black_stone_threshold))
   detected_board = np.zeros((hsize, vsize))
   num_black_stones, num_white_stones = 0,0
   for c in circles:
@@ -503,8 +522,10 @@ def identify_board():
   # this will sometimes be wrong because of handicaps, captures, part board positions
   # but the user can change it with a single click
   if num_black_stones <= num_white_stones:
+    log("Guessing black to play")
     side_to_move.set(BLACK)
   else:
+    log("Guessing white to play")
     side_to_move.set(WHITE)
   draw_histogram(stone_brightnesses)
 
@@ -534,9 +555,9 @@ def find_grid():
     xmin, xmax = min(vlines), max(vlines)
     ymin, ymax = min(hlines), max(hlines)
     for y in added_hcentres:
-      lines_plot.plot((xmin, xmax), (y,y), color="red", linewidth=1)
+      threshold_subfigure.plot((xmin, xmax), (y,y), color="red", linewidth=1)
     for x in added_vcentres:
-      lines_plot.plot((x,x), (ymin, ymax), "red", linewidth=1)
+      threshold_subfigure.plot((x,x), (ymin, ymax), "red", linewidth=1)
     threshold_plot.draw()
       
     if hsize > BOARD_SIZE:
@@ -575,7 +596,6 @@ def scale_image(img, c):
 def log(msg):
   log_text.insert(tk.END, msg + "\n")
   log_text.see(tk.END) # scroll to end when the text gets long
-  print(msg)
 
 
 def choose_threshold(img):
@@ -584,7 +604,7 @@ def choose_threshold(img):
   # Generally, smaller images work better with smaller thresholds
   x = min(img.size)
   t = int(x/12.8 + 16) # just guessing the parameters, this seems to work OK
-  t = min(max(t, 20), 100) # restrict to t between 20 and 100
+  t = min(max(t, 20), 200) # restrict to t between 20 and 200
   return int(t)
 
 
@@ -679,8 +699,6 @@ def select_region():
   rotation_matrix = np.array(((math.cos(theta), math.sin(theta)),
                               (math.sin(theta), math.cos(theta))))
   xdelta, ydelta = np.dot(rotation_matrix, offset) - offset
-  print(offset, theta, xdelta, ydelta)
-  print(rotation_matrix)
   selection_global += (-xdelta, ydelta, -xdelta, ydelta)
 
   # Make sure we haven't pushed the selection rectangle out of bounds,
@@ -692,12 +710,12 @@ def select_region():
 
   new_hsize = int(selection_global[2]-selection_global[0])
   new_vsize = int(selection_global[3]-selection_global[1])
-  log("Zoomed in.  Region size " + str(new_hsize) + "x" + str(new_vsize))
+  log("\nZoomed in.  Region size " + str(new_hsize) + "x" + str(new_vsize))
 
   # Set line detection threshold appropriate for this image size:
   threshold.set(choose_threshold(region_PIL))
 
-  process_image() # this will crop and rotate
+  process_image() # this will crop and rotate, and update everything else
 
   # Reset selection rectangle drawn on image
   input_canvas.delete("all")
@@ -713,6 +731,7 @@ def zoom_out(event):
     log("Zoomed out to full size")
     initialise_parameters()
 
+
 # The next three functions are for changing the black_stone_threshold setting
 # by click and drag
 # They're bound to black_thresh_canvas mouse events
@@ -720,7 +739,7 @@ def zoom_out(event):
 def scale_brightness(event):
   # Utility function: event.x is pixel coordinates on the black_thresh_canvas
   # Rescale to 0-255 range
-  coords = stone_brightness_hist.transData.inverted().transform((event.x,event.y))
+  coords = black_thresh_subfigure.transData.inverted().transform((event.x,event.y))
   return(int(coords[0]))
 
 def set_black_thresh(event):
@@ -728,11 +747,11 @@ def set_black_thresh(event):
   if not board_ready:
     return
   x_actual = scale_brightness(event)
-  x_min, x_max = stone_brightness_hist.get_xlim()
+  x_min, x_max = black_thresh_subfigure.get_xlim()
   if 0 <= x_actual <= x_max:
     black_stone_threshold = scale_brightness(event)
     # Prevent axis from resizing if line is at extreme right:
-    stone_brightness_hist.set_xlim((x_min, x_max))
+    black_thresh_subfigure.set_xlim((x_min, x_max))
     draw_histogram(stone_brightnesses)
 
 def apply_black_thresh(event):
@@ -795,6 +814,7 @@ def save_SGF():
   sgf = open(output_file, "w")
   sgf.write(to_SGF(full_board))
   sgf.close()
+  log("Saved to file " + output_file)
 
 
 def toggle_settings(status = None):
@@ -873,8 +893,6 @@ def draw_images():
 
 
 def draw_board():
-  # event will always be a window configure event, i.e. move or resize
-  # but we can ignore the event because we get the new width/height from the canvas
   output_canvas.configure(bg="#d9d9d9")
   output_canvas.delete("all")
   if not board_ready:
@@ -1054,15 +1072,16 @@ rotate_angle.grid(row=4, columnspan=2, sticky="ew")
 rotate_angle.bind("<ButtonRelease-1>", lambda x: process_image())
 
 processed_frame.columnconfigure(0, weight=1)
+processed_frame.columnconfigure(1, weight=1)
 
 output_text = tk.Label(output_frame, text="Detected board position")
 output_text.grid(row=0, columnspan=2, pady=10)
-reset_button = tk.Button(output_frame, text="reset",
-                         command = reset_board, state = tk.DISABLED)
-reset_button.grid(row=1, column=0)
 save_button = tk.Button(output_frame, text="save",
                         command = save_SGF, state = tk.DISABLED)
-save_button.grid(row=1, column=1)
+save_button.grid(row=1, column=0)
+reset_button = tk.Button(output_frame, text="reset",
+                         command = reset_board, state = tk.DISABLED)
+reset_button.grid(row=1, column=1)
 output_instructions = tk.Label(output_frame,
              text =
 '''Click on board to change between empty,
@@ -1085,13 +1104,11 @@ black_to_play.pack(side=tk.LEFT)
 white_to_play.pack(side=tk.LEFT)
 to_play_label.pack(side=tk.LEFT)
 
-
 # Settings window layout is two frames side by side
 #   settings1 | settings2
 #
-#  settings1 has controls for rotating the image and for the edge detection parameters
-#  settings2 is line detection and classifying stones as black/white
-#  settings2 includes two matplotlib diagnostic plots
+#  settings1 has brightness/contrast settings and stone brightness histogram
+#  settings2 has line threshold setting and lines plot
 
 
 settings_window = tk.Toplevel()
@@ -1169,8 +1186,8 @@ threshold.grid(row=1, pady=(7,71), padx=15, sticky="nsew")
 threshold.bind("<ButtonRelease-1>", lambda x: process_image())
 
 fig1 = Figure(figsize=(3,2), dpi=round(s_width/3))
-lines_plot = fig1.add_subplot(1, 1, 1)
-lines_plot.axis('off')
+threshold_subfigure = fig1.add_subplot(1, 1, 1)
+threshold_subfigure.axis('off')
 threshold_plot = FigureCanvasTkAgg(fig1, master=settings2)
 threshold_plot.get_tk_widget().grid(row=2, padx=15, sticky="nsew")
 
@@ -1180,7 +1197,7 @@ threshold_plot.get_tk_widget().grid(row=2, padx=15, sticky="nsew")
 black_thresh_label = tk.Label(settings1, text="black stone detection")
 black_thresh_label.grid(row=4, pady=(30,20), padx=15, sticky="nsew")
 fig2 = Figure(figsize=(3,2), dpi=round(s_width/3))
-stone_brightness_hist = fig2.add_subplot(1, 1, 1)
+black_thresh_subfigure = fig2.add_subplot(1, 1, 1)
 threshold_line = None # later, this will be set to the marker line on the histogram
 black_thresh_hist = FigureCanvasTkAgg(fig2, master=settings1)
 black_thresh_canvas = black_thresh_hist.get_tk_widget()
@@ -1215,14 +1232,20 @@ log_text = tk.scrolledtext.ScrolledText(log_window, undo=True)
 log_text.pack(expand=True, fill='both')
 log_window.withdraw()
 
+log("img2sgf by Alexander Hanysz, March 2020")
+log("https://github.com/hanysz/img2sgf")
 log(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-log("Using Tk version " + str(tk.TkVersion))
-log("Using OpenCV version " + cv.__version__)
-log("Using numpy version " + np.__version__)
-log("Using scikit-learn version " + sklearn.__version__)
-log("Using matplotlib version " + matplotlib.__version__)
-log("Using Pillow image library version " + Image.__version__)
-log("Using pyscreenshot/ImageGrab version " + ImageGrab.__version__)
+try: # in a try block in case any other package updates remove the .__version__ attribute
+     # (TKinter, what were you thinking?)
+  log("Using Tk version " + str(tk.TkVersion))
+  log("Using OpenCV version " + cv.__version__)
+  log("Using numpy version " + np.__version__)
+  log("Using scikit-learn version " + sklearn.__version__)
+  log("Using matplotlib version " + matplotlib.__version__)
+  log("Using Pillow image library version " + Image.__version__)
+  log("Using pyscreenshot/ImageGrab version " + ImageGrab.__version__)
+except:
+  pass
 
 if len(sys.argv)>3:
   sys.exit("Too many command line arguments.")
