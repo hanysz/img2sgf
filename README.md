@@ -54,8 +54,6 @@ Sorry about the painful installation process!  I do most of my work on Linux, so
 
 # How it works
 
-*To do: add details!*
-
 ## Circle detection
 
 The first thing is to look for circles, not lines!  In principle, a go board is just a 19x19 grid of straight lines, and line detection is an easy problem in image recognition.  The problem is that there are black and white stones on top of the lines.  In an endgame position, some of the grid lines may be completely invisible.  And to make it worse, in printed diagrams (as opposed to real boards), the stones line up perfectly: the edges of the stones also form straight lines, leading to false positives when you do line detection.  So I decided to detect circles first, and temporarily remove them, replacing each circle with a dot at its centre.  Then you can look for lines in what remains.
