@@ -31,7 +31,12 @@ import sklearn # ditto
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from PIL import Image, ImageTk, ImageEnhance #, ImageGrab -- Windows/Mac only!
-import pyscreenshot as ImageGrab
+try:
+  from PIL import ImageGrab # ImageGrab is not available for Linux!
+  using_PIL_ImageGrab = True
+except ImportError:
+  import pyscreenshot as ImageGrab
+  using_PIL_ImageGrab = False
 from datetime import datetime
 import os, sys, math, string
 
@@ -1243,7 +1248,8 @@ try: # in a try block in case any other package updates remove the .__version__ 
   log("Using scikit-learn version " + sklearn.__version__)
   log("Using matplotlib version " + matplotlib.__version__)
   log("Using Pillow image library version " + Image.__version__)
-  log("Using pyscreenshot/ImageGrab version " + ImageGrab.__version__)
+  if not using_PIL_ImageGrab:
+    log("Using pyscreenshot version " + ImageGrab.__version__)
 except:
   pass
 
