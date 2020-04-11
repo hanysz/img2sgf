@@ -1,7 +1,7 @@
 # Load/capture an image and convert to SGF
 # Alexander Hanysz, March 2020
 # https://github.com/hanysz/img2sgf
-# Written for personal use, largely to learn about OpenCV
+# Written for personal use, largely to learn about OpenCV.
 # Distributed without warranty, use at your own risk!
 
 # This file is in four parts:
