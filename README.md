@@ -17,7 +17,7 @@ The right hand pane is a simple board editor for you to fix up any mistakes.
 
 ![screen shot](https://github.com/hanysz/img2sgf/raw/master/screenshot.jpg )
 
-You're welcome to offer feedback, although I can't promise to act on it properly!  Raise an issue here on GitHub, or join [the discussion at Life in 19x19](https://lifein19x19.com/viewtopic.php?f=18&t=17355)
+You're welcome to offer feedback, although I can't promise to act on it promptly!  Raise an issue here on GitHub, or join [the discussion at Life in 19x19](https://lifein19x19.com/viewtopic.php?f=18&t=17355)
 
 # Installation
 
