@@ -789,14 +789,14 @@ def to_SGF(board):
   black_moves, white_moves = "", ""
   if BoardStates.BLACK in board:
     black_moves += "AB"
-    for i in range(hsize):
-      for j in range(vsize):
+    for i in range(BOARD_SIZE):
+      for j in range(BOARD_SIZE):
         if board[i,j] == BoardStates.BLACK:
           black_moves += "[" + board_letters[i] + board_letters[j] + "]"
   if BoardStates.WHITE in board:
     white_moves += "AW"
-    for i in range(hsize):
-      for j in range(vsize):
+    for i in range(BOARD_SIZE):
+      for j in range(BOARD_SIZE):
         if board[i,j] == BoardStates.WHITE:
           white_moves += "[" + board_letters[i] + board_letters[j] + "]"
   if side_to_move.get() == 1:
