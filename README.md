@@ -1,4 +1,7 @@
 # img2sgf
+
+*As of October 2023, I am no longer updating this repository.  Check https://hanysz.net/software.html to see if there are any more recent versions.*
+
 Convert images of go diagrams to SGF format using Python and OpenCV.
 
 Based on ideas from [Imago](http://tomasm.cz/imago) but aimed at printed diagrams rather than photos of real gobans.
